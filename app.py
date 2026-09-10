@@ -2,142 +2,163 @@ import streamlit as st
 import pandas as pd
 import requests
 import datetime
+import xml.etree.ElementTree as ET
 
-st.set_page_config(page_title="우체국 B2B 법인·급여계좌 영업 대시보드", layout="wide")
+st.set_page_config(page_title="우체국 B2B 법인 결제계좌 알리미", layout="wide")
 
-st.title("📮 우체국 B2B 법인 결제계좌 & 급여이체 타깃 알리미")
-st.caption("행안부 인허가 + 금융위 기업기본정보(종업원수) 연계 영업 우선순위 선별 시스템")
+st.title("📮 우체국 B2B 법인 결제계좌 & 급여이체 알리미")
+st.caption("행정안전부 지방행정인허가 실시간 API 연동 시스템")
 
-# 1. 사이드바 - 관할 및 필터
+# 1. B2B 9대 업종별 공공데이터 엔드포인트 URL 매핑
+API_URL_MAP = {
+    # [의료·보건]
+    "의료법인": "http://apis.data.go.kr/1741000/MedicalInstitutionService/getMedicalCorporationList",
+    "병원": "http://apis.data.go.kr/1741000/MedicalInstitutionService/getHospitalList",
+    "의원": "http://apis.data.go.kr/1741000/MedicalInstitutionService/getClinicList",
+    # [시설·용역]
+    "건물위생관리업": "http://apis.data.go.kr/1741000/BuildingSanitationService/getBuildingSanitationList",
+    "승강기유지관리업체": "http://apis.data.go.kr/1741000/ElevatorMaintenanceService/getElevatorMaintenanceList",
+    "소독업": "http://apis.data.go.kr/1741000/DisinfectionService/getDisinfectionList",
+    # [제조·환경]
+    "식품제조가공업": "http://apis.data.go.kr/1741000/FoodManufactureService/getFoodManufactureList",
+    "환경전문공사업": "http://apis.data.go.kr/1741000/EnvironmentalBusinessService/getEnvironmentalBusinessList",
+    "건설폐기물처리업": "http://apis.data.go.kr/1741000/ConstructionWasteService/getConstructionWasteList"
+}
+
+# 2. 사이드바 설정
 with st.sidebar:
-    st.header("⚙️ 법인 타깃 필터")
-    region = st.selectbox("관할 구역", ["부산광역시 동구", "부산광역시 중구", "부산광역시 부산진구", "직접 입력"])
-    if region == "직접 입력":
-        region = st.text_input("관할 시·군·구", "부산광역시 남구")
-        
-    industry_group = st.selectbox(
-        "타깃 법인 업종",
-        ["전체 법인", "의료·병원 법인", "시설·용역관리 법인", "제조·환경 법인"]
+    st.header("🔑 API 설정 및 관할 선택")
+    user_api_key = st.text_input(
+        "공공데이터포털 일반 인증키 (Decoding)", 
+        type="password",
+        help="공공데이터포털 마이페이지의 개발계정 일반인증키(Decoding)를 붙여넣으세요."
     )
     
-    # 핵심 기능: 종업원 수 슬라이더
-    min_employees = st.slider("최소 종업원 수 (급여계좌 타깃)", min_value=1, max_value=200, value=10)
-    st.caption(f"💡 종업원 {min_employees}인 이상 법인을 최우선 방문 타깃으로 정렬합니다.")
+    selected_industry = st.selectbox("타깃 법인 업종 (9종)", list(API_URL_MAP.keys()))
+    target_region = st.text_input("관할 시·군·구 (필터용)", "부산광역시 동구")
+    search_rows = st.slider("조회 건수 (최신순)", min_value=10, max_value=100, value=30)
 
-# 2. 금융위 기업기본정보 API 연동 함수 예시
-def fetch_fsc_company_info(corp_name, service_key):
-    """
-    실제 운영 시: 금융위원회 기업개요조회 API 호출부
-    URL: http://apis.data.go.kr/1160100/service/GetCorpBasicInfoService_V2/getCorpOutline_V2
-    파라미터: corpNm=corp_name, serviceKey=service_key
-    반환 XML/JSON에서 <enpPnpeCscnt>(종업원수) 추출
-    """
-    pass
-
-# 3. 데이터 로딩 (인허가 + 금융위 데이터 결합 시뮬레이션)
-def get_enriched_leads(reg, ind, min_emp):
-    today = datetime.date.today()
+# 3. 공공데이터 API 실제 호출 함수
+def fetch_localdata_api(api_key, industry, num_rows):
+    if not api_key:
+        return None, "사이드바에 공공데이터포털 인증키를 입력해주세요."
     
-    # 인허가 정보에 금융위 기업개요(종업원수, 자본금)가 머지된 데이터
-    raw_leads = [
-        {
-            "인허가일자": (today - datetime.timedelta(days=2)).strftime("%Y-%m-%d"),
-            "법인명": "(주)태평양환경종합관리",
-            "업종": "시설·용역관리",
-            "종업원수": 120,
-            "사업장소재지": f"{reg} 중앙대로 150",
-            "예상 월 급여이체액": "약 3억 6천만 원",
-            "우체국 중점 유치 상품": "대량 급여이체 펌뱅킹 + 법인MMDA",
-            "영업 우선순위": "Tier 1 (최우선)",
-            "영업상태": "접촉 전"
-        },
-        {
-            "인허가일자": (today - datetime.timedelta(days=5)).strftime("%Y-%m-%d"),
-            "법인명": "의료법인 동구중앙의료재단",
-            "업종": "의료·병원",
-            "종업원수": 65,
-            "사업장소재지": f"{reg} 범일로 88",
-            "예상 월 급여이체액": "약 2억 5천만 원",
-            "우체국 중점 유치 상품": "요양급여 입금통장 + 전액보장 법인예금",
-            "영업 우선순위": "Tier 1 (최우선)",
-            "영업상태": "방문 예정"
-        },
-        {
-            "인허가일자": (today - datetime.timedelta(days=12)).strftime("%Y-%m-%d"),
-            "법인명": "(주)동백바이오식품",
-            "업종": "제조·환경",
-            "종업원수": 25,
-            "사업장소재지": f"{reg} 충장대로 210",
-            "예상 월 급여이체액": "약 8천만 원",
-            "우체국 중점 유치 상품": "원자재 결제통장 + 법인체크카드",
-            "영업 우선순위": "Tier 2",
-            "영업상태": "상담 진행중"
-        },
-        {
-            "인허가일자": (today - datetime.timedelta(days=18)).strftime("%Y-%m-%d"),
-            "법인명": "스타트테크(유)",
-            "업종": "소프트웨어/IT",
-            "종업원수": 6,
-            "사업장소재지": f"{reg} 초량상로 12",
-            "예상 월 급여이체액": "약 2천만 원",
-            "우체국 중점 유치 상품": "운영비 결제계좌 + 수수료 면제",
-            "영업 우선순위": "Tier 3",
-            "영업상태": "접촉 전"
+    url = API_URL_MAP.get(industry)
+    params = {
+        "serviceKey": api_key,
+        "pageNo": "1",
+        "numOfRows": str(num_rows),
+        "resultType": "json"  # 기본 JSON 요청
+    }
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        
+        # 1) JSON 응답 파싱 시도
+        try:
+            data_json = response.json()
+            # 표준 공공데이터 JSON 구조 파싱
+            items = data_json.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+            if items:
+                df = pd.DataFrame(items)
+                return df, None
+        except Exception:
+            pass
+
+        # 2) XML 응답 파싱 시도 (JSON 파싱 실패 시 대비)
+        root = ET.fromstring(response.text)
+        items_xml = root.findall(".//item")
+        if items_xml:
+            parsed_list = []
+            for item in items_xml:
+                row_dict = {child.tag: child.text for child in item}
+                parsed_list.append(row_dict)
+            return pd.DataFrame(parsed_list), None
+        
+        return None, f"데이터가 없거나 응답 형식 오류입니다: {response.text[:200]}"
+        
+    except Exception as e:
+        return None, f"API 호출 중 네트워크 오류 발생: {str(e)}"
+
+# 4. 데이터 로드 및 정제
+if user_api_key:
+    raw_df, err_msg = fetch_localdata_api(user_api_key, selected_industry, search_rows)
+    
+    if err_msg:
+        st.error(err_msg)
+    elif raw_df is not None and not raw_df.empty:
+        # 공공데이터 표준 필드명 매핑 (영문 -> 직관적 한글)
+        field_map = {
+            "prmisnDe": "인허가일자",
+            "bplcNm": "법인/상호명",
+            "siteRdnWhlAddr": "도로명주소",
+            "siteWhlAddr": "지번주소",
+            "dtlStateNm": "영업상태",
+            "trdStateGbn": "상태코드"
         }
-    ]
-    df = pd.DataFrame(raw_leads)
-    
-    # 업종 필터
-    if ind != "전체 법인":
-        ind_keyword = ind.split("·")[0]
-        df = df[df["업종"].str.contains(ind_keyword)]
         
-    # 종업원 수 필터 적용
-    return df[df["종업원수"] >= min_emp]
-
-leads_df = get_enriched_leads(region, industry_group, min_employees)
-
-# 4. 현황 메트릭 요약
-c1, c2, c3 = st.columns(3)
-c1.metric("타깃 발굴 법인", f"{len(leads_df)} 개사")
-total_employees = leads_df["종업원수"].sum() if not leads_df.empty else 0
-c2.metric("잠재 급여이체 계좌 수", f"{total_employees:,} 계좌")
-c3.metric("최우선 방문(Tier 1) 타깃", f"{len(leads_df[leads_df['영업 우선순위']=='Tier 1 (최우선)'])} 개사")
-
-st.divider()
-
-# 5. 영업 리스트 그리드 (종업원 수 내림차순 정렬)
-st.subheader(f"📋 {region} 신규 법인 영업 리스트 (종업원 {min_employees}인 이상)")
-
-if not leads_df.empty:
-    sorted_df = leads_df.sort_values(by="종업원수", ascending=False)
-    
-    edited_df = st.data_editor(
-        sorted_df,
-        column_config={
-            "종업원수": st.column_config.NumberColumn(
-                "상시 종업원수",
-                format="%d 명",
-                help="금융위 기업개요 기준 고용 인원"
-            ),
-            "영업상태": st.column_config.SelectboxColumn(
-                "영업 단계",
-                options=["접촉 전", "방문 예정", "상담 진행중", "계좌 개설 완료", "보류"],
-                required=True
-            )
-        },
-        disabled=["인허가일자", "법인명", "업종", "사업장소재지", "예상 월 급여이체액", "우체국 중점 유치 상품", "영업 우선순위"],
-        hide_index=True,
-        use_container_width=True
-    )
-
-    # 엑셀 다운로드 버튼
-    csv = edited_df.to_csv(index=False).encode('utf-8-sig')
-    st.download_button(
-        label="📥 타깃 법인 영업 리스트 다운로드 (급여이체 대상)",
-        data=csv,
-        file_name=f"우체국_급여계좌영업_{region}_{datetime.date.today()}.csv",
-        mime="text/csv"
-    )
+        # 존재하는 컬럼만 리네임
+        view_df = raw_df.rename(columns={k: v for k, v in field_map.items() if k in raw_df.columns})
+        
+        # 주소 통합 처리
+        if "도로명주소" in view_df.columns and "지번주소" in view_df.columns:
+            view_df["사업장소재지"] = view_df["도로명주소"].fillna(view_df["지번주소"])
+        elif "도로명주소" in view_df.columns:
+            view_df["사업장소재지"] = view_df["도로명주소"]
+        else:
+            view_df["사업장소재지"] = target_region
+            
+        # 관할 구역 필터링
+        if target_region:
+            filtered_df = view_df[view_df["사업장소재지"].str.contains(target_region, na=False)].copy()
+        else:
+            filtered_df = view_df.copy()
+            
+        # 우체국 B2B 마케팅 자동 제안 부여
+        filtered_df["추천 우체국 상품"] = (
+            "요양급여 결제계좌 + 100% 국가보장 MMDA" if "의" in selected_industry or "병원" in selected_industry 
+            else "대량 급여이체 수수료 평생면제 + 법인MMDA"
+        )
+        filtered_df["영업상태"] = "접촉 전"
+        
+        # 화면 표출용 컬럼 정리
+        final_cols = [c for c in ["인허가일자", "법인/상호명", "사업장소재지", "영업상태", "추천 우체국 상품"] if c in filtered_df.columns]
+        display_df = filtered_df[final_cols]
+        
+        # 5. 요약 통계 및 메트릭
+        c1, c2, c3 = st.columns(3)
+        c1.metric(f"관내 {selected_industry} 발굴", f"{len(display_df)} 건")
+        c2.metric("중점 유치 상품", "법인MMDA / 급여이체")
+        c3.metric("예치금 보호", "100% 국가 전액보장")
+        
+        st.divider()
+        
+        # 6. 인터랙티브 데이터 테이블
+        st.subheader(f"📋 {target_region} {selected_industry} 실시간 인허가 명부")
+        
+        edited_df = st.data_editor(
+            display_df,
+            column_config={
+                "영업상태": st.column_config.SelectboxColumn(
+                    "진행 단계",
+                    options=["접촉 전", "방문 예정", "상담 진행중", "계좌 개설 완료", "보류"],
+                    required=True
+                )
+            },
+            disabled=["인허가일자", "법인/상호명", "사업장소재지", "추천 우체국 상품"],
+            hide_index=True,
+            use_container_width=True
+        )
+        
+        # 7. 엑셀 다운로드
+        csv_data = edited_df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button(
+            label="📥 타깃 리스트 엑셀(CSV) 다운로드",
+            data=csv_data,
+            file_name=f"우체국_B2B영업_{selected_industry}_{datetime.date.today()}.csv",
+            mime="text/csv"
+        )
+    else:
+        st.warning(f"'{target_region}' 관내에 해당하는 최근 {selected_industry} 데이터가 없습니다. 관할 구역 명칭을 확인하거나 조회 건수를 늘려보세요.")
 else:
-    st.info("선택한 조건(업종 및 최소 종업원 수)에 해당하는 신규 법인이 없습니다. 사이드바 필터를 완화해 보세요.")
+    st.info("👈 왼쪽 사이드바에 [공공데이터포털 인증키(Decoding)]를 입력하면 실시간 인허가 법인 데이터가 조회됩니다.")
