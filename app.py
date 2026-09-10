@@ -12,17 +12,17 @@ st.caption("행정안전부 지방행정인허가 실시간 API 연동 시스템
 # 1. B2B 9대 업종별 공공데이터 엔드포인트 URL 매핑
 API_URL_MAP = {
     # [의료·보건]
-    "의료법인": "http://apis.data.go.kr/1741000/MedicalInstitutionService/getMedicalCorporationList",
-    "병원": "http://apis.data.go.kr/1741000/MedicalInstitutionService/getHospitalList",
-    "의원": "http://apis.data.go.kr/1741000/MedicalInstitutionService/getClinicList",
+#    "의료법인": "http://apis.data.go.kr/1741000/MedicalInstitutionService/getMedicalCorporationList",
+    "병원": "https://apis.data.go.kr/1741000/hospitals/info",
+    "의원": "https://apis.data.go.kr/1741000/clinics/info",
     # [시설·용역]
-    "건물위생관리업": "http://apis.data.go.kr/1741000/BuildingSanitationService/getBuildingSanitationList",
-    "승강기유지관리업체": "http://apis.data.go.kr/1741000/ElevatorMaintenanceService/getElevatorMaintenanceList",
-    "소독업": "http://apis.data.go.kr/1741000/DisinfectionService/getDisinfectionList",
+#    "건물위생관리업": "https://apis.data.go.kr/1741000/building_sanitation/info",
+#    "승강기유지관리업체": "https://apis.data.go.kr/1741000/elevator_maintenance/info",
+    "소독업": "https://apis.data.go.kr/1741000/disinfection_companies/info",
     # [제조·환경]
-    "식품제조가공업": "http://apis.data.go.kr/1741000/FoodManufactureService/getFoodManufactureList",
-    "환경전문공사업": "http://apis.data.go.kr/1741000/EnvironmentalBusinessService/getEnvironmentalBusinessList",
-    "건설폐기물처리업": "http://apis.data.go.kr/1741000/ConstructionWasteService/getConstructionWasteList"
+#    "식품제조가공업": "http://apis.data.go.kr/1741000/FoodManufactureService/getFoodManufactureList",
+#    "환경전문공사업": "http://apis.data.go.kr/1741000/EnvironmentalBusinessService/getEnvironmentalBusinessList",
+#    "건설폐기물처리업": "http://apis.data.go.kr/1741000/ConstructionWasteService/getConstructionWasteList"
 }
 
 # 2. 사이드바 설정
