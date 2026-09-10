@@ -38,58 +38,58 @@ with st.sidebar:
     target_region = st.text_input("관할 시·군·구 (필터용)", "부산광역시 동구")
     search_rows = st.slider("조회 건수 (최신순)", min_value=10, max_value=100, value=30)
 
-# 3. 공공데이터 API 실제 호출 함수 (디버깅 강화 버전)
-def fetch_localdata_api(api_key, industry, num_rows):
-    if not api_key:
-        return None, "사이드바에 공공데이터포털 인증키를 입력해주세요."
+# 3. API 실시간 호출 함수 (타임아웃 30초 연장 + 1시간 캐싱 적용)
+@st.cache_data(ttl=3600, show_spinner="공공데이터 서버에서 데이터를 조회하는 중입니다. 잠시만 기다려주세요...")
+def fetch_disinfection_data(key_input, num_rows):
+    if not key_input:
+        return None, "사이드바에 API 인증키를 입력해주세요."
     
-    url = API_URL_MAP.get(industry)
+    clean_key = urllib.parse.unquote(key_input.strip())
+    
     params = {
-        "serviceKey": api_key.strip(), # 공백 제거
+        "serviceKey": clean_key,
         "pageNo": "1",
         "numOfRows": str(num_rows),
         "resultType": "json"
     }
     
     try:
-        # 호출 시도
-        response = requests.get(url, params=params, timeout=10)
+        # 타임아웃을 10초 -> (연결 10초, 수신 30초)로 대폭 연장
+        response = requests.get(TARGET_API_URL, params=params, timeout=(10, 30))
         
-        # HTTP 상태 코드가 정상이 아닐 경우 (404, 500 등)
         if response.status_code != 200:
-            return None, f"서버 응답 오류 (HTTP {response.status_code}): 호출 주소를 확인하세요. [{url}]"
-        
-        # 응답 내용이 완전히 비어있는 경우
-        if not response.text.strip():
-            return None, f"서버에서 빈 응답을 반환했습니다. (인증키 동기화 지연이거나 조회 데이터가 없음)"
+            return None, f"서버 응답 오류 (HTTP {response.status_code}): {response.text[:200]}"
             
-        # 1) JSON 파싱 시도
+        # 1) JSON 형식 파싱
         try:
             data_json = response.json()
-            items = data_json.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+            body = data_json.get("response", {}).get("body", {})
+            items = body.get("items", {}).get("item", [])
+            
+            if isinstance(items, dict):
+                items = [items]
+                
             if items:
                 return pd.DataFrame(items), None
-            else:
-                return None, f"JSON 응답에 조회된 데이터(item)가 없습니다: {response.text[:300]}"
         except Exception:
             pass
 
-        # 2) XML 파싱 시도
+        # 2) XML 형식 파싱
         try:
             root = ET.fromstring(response.text)
             items_xml = root.findall(".//item")
             if items_xml:
-                parsed_list = []
+                rows = []
                 for item in items_xml:
-                    row_dict = {child.tag: child.text for child in item}
-                    parsed_list.append(row_dict)
-                return pd.DataFrame(parsed_list), None
+                    rows.append({child.tag: child.text for child in item})
+                return pd.DataFrame(rows), None
             else:
-                # 공공데이터 인증키 에러 XML 메시지 표출 (SERVICE_KEY_IS_NOT_REGISTERED_ERROR 등)
-                return None, f"공공데이터 서버 에러 메시지: {response.text[:300]}"
+                return None, f"공공데이터 응답 내용: {response.text[:300]}"
         except ET.ParseError:
-            return None, f"응답 해석 실패 (HTML/오류문환): {response.text[:300]}"
-        
+            return None, f"응답 해석 불가: {response.text[:200]}"
+            
+    except requests.exceptions.Timeout:
+        return None, "공공데이터포털 서버 지연으로 응답 시간이 초과되었습니다. '가져올 데이터 건수'를 20건 정도로 줄여서 다시 시도해보세요."
     except Exception as e:
         return None, f"네트워크 연결 실패: {str(e)}"
 
