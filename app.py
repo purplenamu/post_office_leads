@@ -8,22 +8,22 @@ import xml.etree.ElementTree as ET
 st.set_page_config(page_title="우체국 B2B 법인 결제계좌 알리미", layout="wide")
 
 st.title("📮 우체국 B2B 법인 결제계좌 & 급여이체 알리미")
-st.caption("공공데이터포털 실시간 API 연동 (데이터 진단 모드 포함)")
+st.caption("공공데이터포털 실시간 API 연동 (자동 컬럼 매핑 탑재)")
 
 API_URL_MAP = {
-    "소독업": "https://apis.data.go.kr/1741000/disinfection_companies/info",
     "병원": "https://apis.data.go.kr/1741000/hospitals/info",
     "의원": "https://apis.data.go.kr/1741000/clinics/info",
     "건물위생관리업": "https://apis.data.go.kr/1741000/building_sanitation/info",
-    "승강기유지관리업체": "https://apis.data.go.kr/1741000/elevator_maintenance/info"
+    "승강기유지관리업체": "https://apis.data.go.kr/1741000/elevator_maintenance/info",
+    "소독업": "https://apis.data.go.kr/1741000/disinfection_companies/info"
 }
 
 with st.sidebar:
     st.header("🔑 API 설정 및 관할")
     user_api_key = st.text_input("공공데이터 API 인증키", type="password")
     selected_industry = st.selectbox("타깃 업종", list(API_URL_MAP.keys()))
-    target_region = st.text_input("관할 시·군·구 (안 나올 시 빈칸으로 조회)", "부산광역시 동구")
-    search_rows = st.slider("가져올 데이터 건수", min_value=10, max_value=100, value=50)
+    target_region = st.text_input("관할 시·군·구 (필터)", "")
+    search_rows = st.slider("조회 건수", min_value=10, max_value=100, value=50)
 
 @st.cache_data(ttl=3600, show_spinner="공공데이터 서버에서 데이터를 조회하는 중입니다...")
 def fetch_api_data(api_key, industry_name, num_rows):
@@ -72,27 +72,46 @@ def fetch_api_data(api_key, industry_name, num_rows):
     except Exception as e:
         return None, f"연결 실패: {str(e)}"
 
-# 화면 표출부
+# 대소문자/언더바 무시하고 가장 적합한 컬럼을 찾는 함수
+def find_matching_column(columns, candidates):
+    norm_map = {str(c).lower().replace("_", ""): c for c in columns}
+    for cand in candidates:
+        cand_norm = cand.lower().replace("_", "")
+        if cand_norm in norm_map:
+            return norm_map[cand_norm]
+    return None
+
 if user_api_key:
     raw_df, err_msg = fetch_api_data(user_api_key, selected_industry, search_rows)
     
     if err_msg:
         st.error(err_msg)
     elif raw_df is not None and not raw_df.empty:
-        # 다양한 공공데이터 버전별 컬럼명 자동 매핑
         df = raw_df.copy()
         
-        # 1. 상호명 매핑
-        name_col = next((c for c in ["bplcNm", "bplcnm", "entrpsNm"] if c in df.columns), None)
-        df["사업장명"] = df[name_col] if name_col else "상호명 미확인"
+        # 1. 상호명 자동 탐색 (모든 변형 지원)
+        name_col = find_matching_column(df.columns, [
+            "bplcNm", "bplcnm", "entrpsNm", "entrpsnm", "yadmNm", "yadmnm", 
+            "corpNm", "cmpnyNm", "instNm", "사업장명", "상호명", "병원명"
+        ])
+        df["사업장명"] = df[name_col] if name_col else df.iloc[:, 1]  # 못 찾으면 2번째 열 자동 배정
         
-        # 2. 인허가일자 매핑
-        date_col = next((c for c in ["prmisnDe", "apvPermYmd", "apvpermymd"] if c in df.columns), None)
+        # 2. 인허가일자 자동 탐색
+        date_col = find_matching_column(df.columns, [
+            "prmisnDe", "prmisnde", "apvPermYmd", "apvpermymd", "opnDe", "opnde", 
+            "estbDe", "estbde", "prmDt", "인허가일자", "개설일자"
+        ])
         df["인허가일자"] = df[date_col] if date_col else "-"
         
-        # 3. 주소 매핑 (도로명 우선, 지번 차선)
-        rdn_col = next((c for c in ["siteRdnWhlAddr", "rdnWhlAddr", "rdnwhladdr"] if c in df.columns), None)
-        site_col = next((c for c in ["siteWhlAddr", "sitewhladdr"] if c in df.columns), None)
+        # 3. 주소 자동 탐색 (도로명 우선, 지번 차선)
+        rdn_col = find_matching_column(df.columns, [
+            "siteRdnWhlAddr", "siterdnwhladdr", "rdnWhlAddr", "rdnwhladdr", 
+            "rdnAddr", "도로명주소", "도로명전체주소"
+        ])
+        site_col = find_matching_column(df.columns, [
+            "siteWhlAddr", "sitewhladdr", "whlAddr", "whladdr", 
+            "addr", "locAddr", "지번주소", "소재지전체주소"
+        ])
         
         if rdn_col and site_col:
             df["사업장소재지"] = df[rdn_col].fillna(df[site_col])
@@ -101,15 +120,15 @@ if user_api_key:
         elif site_col:
             df["사업장소재지"] = df[site_col]
         else:
-            df["사업장소재지"] = "주소 미확인"
-            
-        # 지역 필터링
+            df["사업장소재지"] = "주소 확인 필요"
+
+        # 지역 필터링 (공백이면 전국 전체 출력)
         if target_region.strip():
             filtered_df = df[df["사업장소재지"].str.contains(target_region.strip(), na=False)].copy()
         else:
             filtered_df = df.copy()
 
-        # 우체국 마케팅 전략 매핑
+        # 우체국 마케팅 전략 자동 부여
         filtered_df["추천 우체국 상품"] = (
             "요양급여 결제계좌 + 100% 국가보장 MMDA" if selected_industry in ["병원", "의원"] 
             else "대량 급여이체 수수료 평생면제 + 법인MMDA"
@@ -119,7 +138,8 @@ if user_api_key:
         # 메인 테이블 표출
         if not filtered_df.empty:
             view_cols = ["인허가일자", "사업장명", "사업장소재지", "영업상태", "추천 우체국 상품"]
-            st.subheader(f"📋 {target_region if target_region else '전국'} {selected_industry} 명부 ({len(filtered_df)}건)")
+            region_title = target_region if target_region.strip() else "전국"
+            st.subheader(f"📋 {region_title} {selected_industry} 명부 ({len(filtered_df)}건)")
             
             edited_df = st.data_editor(
                 filtered_df[view_cols],
@@ -143,15 +163,14 @@ if user_api_key:
                 mime="text/csv"
             )
         else:
-            st.warning(f"수신된 전국 {len(df)}건 데이터 중 '{target_region}' 관내 사업장이 없습니다.")
-            st.info("💡 사이드바의 [관할 시·군·구]를 지우고 빈칸으로 두시거나, [조회 건수] 슬라이더를 100건으로 늘려보세요.")
+            st.warning(f"조회된 {len(df)}건 중 '{target_region}' 관내 사업장이 없습니다.")
 
-        # 데이터 점검용 원본 뷰어
-        with st.expander("🔍 공공데이터 서버에서 수신한 원본 데이터 확인 (디버깅용)"):
-            st.write(f"총 수신 건수: {len(df)}건")
-            st.dataframe(df[["인허가일자", "사업장명", "사업장소재지"]], use_container_width=True)
+        # 하단 실제 수신 데이터 확인창 (항목명 검증용)
+        with st.expander("🔍 공공데이터 서버 실제 수신 항목명 확인 (클릭)"):
+            st.write("서버에서 받은 실제 컬럼 목록:", list(raw_df.columns))
+            st.dataframe(raw_df.head(3), use_container_width=True)
             
     else:
-        st.warning("조회된 데이터가 없습니다. API 키를 다시 확인해주세요.")
+        st.warning("조회된 데이터가 없습니다.")
 else:
     st.info("👈 사이드바에 공공데이터 API 인증키를 입력하세요.")
