@@ -38,47 +38,60 @@ with st.sidebar:
     target_region = st.text_input("관할 시·군·구 (필터용)", "부산광역시 동구")
     search_rows = st.slider("조회 건수 (최신순)", min_value=10, max_value=100, value=30)
 
-# 3. 공공데이터 API 실제 호출 함수
+# 3. 공공데이터 API 실제 호출 함수 (디버깅 강화 버전)
 def fetch_localdata_api(api_key, industry, num_rows):
     if not api_key:
         return None, "사이드바에 공공데이터포털 인증키를 입력해주세요."
     
     url = API_URL_MAP.get(industry)
     params = {
-        "serviceKey": api_key,
+        "serviceKey": api_key.strip(), # 공백 제거
         "pageNo": "1",
         "numOfRows": str(num_rows),
-        "resultType": "json"  # 기본 JSON 요청
+        "resultType": "json"
     }
     
     try:
+        # 호출 시도
         response = requests.get(url, params=params, timeout=10)
         
-        # 1) JSON 응답 파싱 시도
+        # HTTP 상태 코드가 정상이 아닐 경우 (404, 500 등)
+        if response.status_code != 200:
+            return None, f"서버 응답 오류 (HTTP {response.status_code}): 호출 주소를 확인하세요. [{url}]"
+        
+        # 응답 내용이 완전히 비어있는 경우
+        if not response.text.strip():
+            return None, f"서버에서 빈 응답을 반환했습니다. (인증키 동기화 지연이거나 조회 데이터가 없음)"
+            
+        # 1) JSON 파싱 시도
         try:
             data_json = response.json()
-            # 표준 공공데이터 JSON 구조 파싱
             items = data_json.get("response", {}).get("body", {}).get("items", {}).get("item", [])
             if items:
-                df = pd.DataFrame(items)
-                return df, None
+                return pd.DataFrame(items), None
+            else:
+                return None, f"JSON 응답에 조회된 데이터(item)가 없습니다: {response.text[:300]}"
         except Exception:
             pass
 
-        # 2) XML 응답 파싱 시도 (JSON 파싱 실패 시 대비)
-        root = ET.fromstring(response.text)
-        items_xml = root.findall(".//item")
-        if items_xml:
-            parsed_list = []
-            for item in items_xml:
-                row_dict = {child.tag: child.text for child in item}
-                parsed_list.append(row_dict)
-            return pd.DataFrame(parsed_list), None
-        
-        return None, f"데이터가 없거나 응답 형식 오류입니다: {response.text[:200]}"
+        # 2) XML 파싱 시도
+        try:
+            root = ET.fromstring(response.text)
+            items_xml = root.findall(".//item")
+            if items_xml:
+                parsed_list = []
+                for item in items_xml:
+                    row_dict = {child.tag: child.text for child in item}
+                    parsed_list.append(row_dict)
+                return pd.DataFrame(parsed_list), None
+            else:
+                # 공공데이터 인증키 에러 XML 메시지 표출 (SERVICE_KEY_IS_NOT_REGISTERED_ERROR 등)
+                return None, f"공공데이터 서버 에러 메시지: {response.text[:300]}"
+        except ET.ParseError:
+            return None, f"응답 해석 실패 (HTML/오류문환): {response.text[:300]}"
         
     except Exception as e:
-        return None, f"API 호출 중 네트워크 오류 발생: {str(e)}"
+        return None, f"네트워크 연결 실패: {str(e)}"
 
 # 4. 데이터 로드 및 정제
 if user_api_key:
