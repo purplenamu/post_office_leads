@@ -49,10 +49,22 @@ REGION_HIERARCHY = {
     }
 }
 
-# 3. 사이드바 UI
-with st.sidebar:# 사용자가 직접 입력하면 그 키를 쓰고, 비워두면 시스템 Secrets 키를 자동 적용
-default_key = st.secrets.get("PUBLIC_DATA_KEY", "")
-user_api_key = st.sidebar.text_input("공공데이터 API 인증키 (선택사항)", value=default_key, type="password")
+# 3. 사이드바 UI (Secrets 연동 및 들여쓰기 교정 완료)
+default_key = ""
+try:
+    if "PUBLIC_DATA_KEY" in st.secrets:
+        default_key = st.secrets["PUBLIC_DATA_KEY"]
+except Exception:
+    default_key = ""
+
+with st.sidebar:
+    st.header("🔑 API 및 타깃 관할 설정")
+    user_api_key = st.text_input(
+        "공공데이터 API 인증키 (선택사항)",
+        value=default_key,
+        type="password",
+        help="Secrets에 등록된 기본 인증키가 자동 적용됩니다. 별도 인증키가 있으신 경우에만 직접 입력하세요."
+    )
     selected_industry = st.selectbox("타깃 업종", list(API_URL_MAP.keys()), index=0)
     
     sido_choice = st.selectbox("광역 시·도 선택", list(REGION_HIERARCHY.keys()), index=0)
@@ -62,21 +74,13 @@ user_api_key = st.sidebar.text_input("공공데이터 API 인증키 (선택사�
     only_active = st.checkbox("영업/정상 사업장만 조회", value=True)
     
     st.divider()
-    st.subheader("🔍 데이터 탐색 범위 (기간 확대)")
-    start_page = st.number_input(
-        "탐색 시작 페이지",
-        min_value=1,
-        max_value=100,
-        value=1,
-        step=5,
-        help="1페이지는 최근 등록 건이며, 11·21·31페이지로 올리면 과거 등록 사업장으로 거슬러 올라갑니다."
-    )
+    st.subheader("🔍 전국 데이터 탐색 범위")
     scan_pages = st.slider(
-        "연속 수집 페이지 수 (페이지당 100건)",
+        "수집 페이지 수 (페이지당 100건)",
         min_value=5,
         max_value=30,
         value=15,
-        help="15페이지 설정 시 1,500건, 30페이지 설정 시 3,000건을 연속 스캔하여 구별 모수를 늘립니다."
+        help="15페이지는 전국 최신 1,500건, 30페이지는 3,000건을 1페이지부터 연속 수집합니다."
     )
 
 # 4. 단일 페이지 호출 함수
@@ -112,19 +116,19 @@ def fetch_single_page(clean_key, target_url, page):
         return None
     return None
 
-# 5. 다중 페이지 수집 함수 (시작 페이지 ~ 종료 페이지)
+# 5. 다중 페이지 수집 함수 (1페이지부터 연속 수집)
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_all_data(api_key, industry_name, start_p, total_pages):
+def fetch_all_data(api_key, industry_name, total_pages):
     if not api_key:
-        return None, "사이드바에 API 인증키를 입력해주세요."
+        return None, "사이드바에 API 인증키를 입력하거나 Streamlit Secrets 설정을 확인해주세요."
     
     clean_key = urllib.parse.unquote(api_key.strip())
     target_url = API_URL_MAP[industry_name]
     
     all_dfs = []
-    pbar = st.progress(0, text=f"전국 데이터 탐색 중 ({start_p} ~ {start_p + total_pages - 1} 페이지)...")
-    for idx, p in enumerate(range(start_p, start_p + total_pages)):
-        pbar.progress((idx + 1) / total_pages, text=f"전국 데이터 수집 중 ({p}페이지 / 총 {total_pages}장)...")
+    pbar = st.progress(0, text=f"전국 최신 데이터 자동 수집 중 (1 ~ {total_pages} 페이지)...")
+    for p in range(1, total_pages + 1):
+        pbar.progress(p / total_pages, text=f"전국 데이터 수집 중 ({p}/{total_pages} 페이지)...")
         pdf = fetch_single_page(clean_key, target_url, p)
         if pdf is not None and not pdf.empty:
             all_dfs.append(pdf)
@@ -192,17 +196,24 @@ def process_and_filter(df, sido, reg_name, code, active_only):
         df["우편번호"] = "-"
     df["우편번호"] = df["우편번호"].fillna("-")
 
-    # 종업원수 (의료인 HCWKRCNT + 식품/제조 TOTEPNUM, EMPLYCO, TOTEMPLYCNT 등 전수 매핑)
-    emp_candidates = [
-        "HCWKRCNT", "TOTEPNUM", "EMPLYCO", "TOTEMPLYCNT", "EMPLYCNT",
-        "HOFFEPNUM", "FCTYEPNUM", "MNPWRCNT", "TOTWORKMANCNT"
-    ]
-    emp_col = None
-    for cand in emp_candidates:
-        if cand in norm:
-            emp_col = norm[cand]
-            break
-    df["종업원(근로자)수"] = pd.to_numeric(df[emp_col], errors="coerce").fillna(0).astype(int) if emp_col else 0
+    # 종업원(근로자/의료인)수 정밀 집계
+    def extract_emp(row):
+        tot_keys = ["TOTEPNUM", "HCWKRCNT", "TOTEMPLYCNT", "EMPLYCNT", "EMPLYCO"]
+        for k in tot_keys:
+            if k in norm and pd.notna(row[norm[k]]):
+                v = pd.to_numeric(row[norm[k]], errors="coerce")
+                if pd.notna(v) and v > 0:
+                    return int(v)
+        parts = 0
+        part_keys = ["MANEPNUM", "WMNEPNUM", "WMEPNUM", "HOFFEPNUM", "FCTYPRDNEPNUM", "FCTYOFCLNEPNUM", "FCTYEPNUM", "MNPWRCNT", "TOTWORKMANCNT"]
+        for k in part_keys:
+            if k in norm and pd.notna(row[norm[k]]):
+                v = pd.to_numeric(row[norm[k]], errors="coerce")
+                if pd.notna(v) and v > 0:
+                    parts += int(v)
+        return parts
+
+    df["종업원(근로자)수"] = df.apply(extract_emp, axis=1)
 
     # 전화번호
     tel_col = norm.get("TELNO", None)
@@ -380,7 +391,7 @@ tab1, tab2 = st.tabs(["📋 실시간 명부 & 라벨 출력", "📊 지역별 5
 with tab1:
     if user_api_key:
         with st.spinner(f"'{selected_region_name}'의 '{selected_industry}' 데이터를 수집 중입니다..."):
-            raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, start_page, scan_pages)
+            raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, scan_pages)
         
         if err_msg:
             st.error(err_msg)
@@ -400,29 +411,40 @@ with tab1:
             c1, c2, c3, c4 = st.columns(4)
             c1.metric(f"{selected_region_name} 발굴", f"{len(filtered_df)} 개소")
             tot_emp = filtered_df["종업원(근로자)수"].sum() if not filtered_df.empty else 0
-            c2.metric("잠재 급여이체 대상", f"{tot_emp:,} 명")
+            
+            if tot_emp > 0:
+                emp_display = f"{tot_emp:,} 명"
+            else:
+                emp_display = "신설 법인 (확인 요망)"
+                
+            c2.metric("잠재 급여이체 대상", emp_display, help="공공 인허가 원천 데이터는 신규 등록 시 종업원 수가 0명으로 등재되는 경우가 많습니다.")
             c3.metric("중점 유치 대상", focus_target)
-            c4.metric(f"전국 스캔 모수 (p.{start_page}~)", f"{len(raw_df):,} 건")
+            c4.metric("전국 스캔 모수", f"{len(raw_df):,} 건")
             
             st.divider()
             
             if not filtered_df.empty:
-                view_cols = ["인허가일자", "사업장명", "우편번호", "사업장소재지", "종업원(근로자)수", "전화번호", "영업상태"]
+                display_table_df = filtered_df.copy()
+                display_table_df["종업원수(표시)"] = display_table_df["종업원(근로자)수"].apply(
+                    lambda v: f"{v}명" if v > 0 else "신설 (미기재)"
+                )
+                
+                view_cols = ["인허가일자", "사업장명", "우편번호", "사업장소재지", "종업원수(표시)", "전화번호", "영업상태"]
                 st.subheader(f"📋 {selected_region_name} {selected_industry} 실시간 명부 ({len(filtered_df)}건 확보)")
                 
                 edited_df = st.data_editor(
-                    filtered_df[view_cols],
+                    display_table_df[view_cols],
                     column_config={
                         "인허가일자": st.column_config.TextColumn("개설(인허가)일자"),
                         "우편번호": st.column_config.TextColumn("우편번호"),
-                        "종업원(근로자)수": st.column_config.NumberColumn("종업원(근로자)수", format="%d명"),
+                        "종업원수(표시)": st.column_config.TextColumn("종업원(근로자)수"),
                         "영업상태": st.column_config.SelectboxColumn(
                             "영업 단계",
                             options=["접촉 전", "전화(TM) 완료", "방문 예정", "상담 진행중", "계좌 개설 완료", "보류"],
                             required=True
                         )
                     },
-                    disabled=["인허가일자", "사업장명", "우편번호", "사업장소재지", "종업원(근로자)수", "전화번호"],
+                    disabled=["인허가일자", "사업장명", "우편번호", "사업장소재지", "종업원수(표시)", "전화번호"],
                     hide_index=True,
                     use_container_width=True
                 )
@@ -454,8 +476,8 @@ with tab1:
                 else:
                     st.info("현재 모든 업체의 진행 단계가 변경되어 '접촉 전' 상태인 업체가 없습니다.")
             else:
-                st.warning(f"스캔 구간(전국 {len(raw_df):,}건) 중 '{selected_region_name}' 소재 {selected_industry} 사업장이 없습니다.")
-                st.info("💡 사이드바의 **[탐색 시작 페이지]**를 11, 21 등으로 올리거나 **[연속 수집 페이지 수]**를 20~30장으로 늘려 과거 등록 사업장을 탐색해 보세요.")
+                st.warning(f"전국 최신 {len(raw_df):,}건 중 '{selected_region_name}' 소재 {selected_industry} 사업장이 없습니다.")
+                st.info("💡 사이드바의 **[수집 페이지 수]**를 20~30장으로 늘려 스캔 범위를 확대해 보세요.")
         else:
             st.warning("데이터를 가져오지 못했습니다.")
     else:
@@ -474,7 +496,7 @@ with tab2:
             industries = list(API_URL_MAP.keys())
             for idx, ind_name in enumerate(industries):
                 progress_bar.progress((idx + 1) / len(industries), text=f"'{ind_name}' 데이터 수집 및 분석 중 ({idx+1}/{len(industries)})...")
-                raw_ind, _ = fetch_all_data(user_api_key, ind_name, start_page, scan_pages)
+                raw_ind, _ = fetch_all_data(user_api_key, ind_name, scan_pages)
                 if raw_ind is not None and not raw_ind.empty:
                     f_df = process_and_filter(raw_ind, sido_choice, selected_region_name, target_code, only_active)
                     cnt = len(f_df)
@@ -510,7 +532,7 @@ with tab2:
             sc1, sc2, sc3 = st.columns(3)
             sc1.metric(f"{selected_region_name} 최다 업종 (1위)", top_ind)
             sc2.metric("5대 업종 총 사업체수", f"{total_biz:,} 개소")
-            sc3.metric("잠재 총 종사자수", f"{total_emp_all:,} 명")
+            sc3.metric("잠재 총 종사자수", f"{total_emp_all:,} 명" if total_emp_all > 0 else "신설 법인 위주")
             
             st.divider()
             
