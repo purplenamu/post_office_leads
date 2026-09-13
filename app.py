@@ -49,7 +49,7 @@ REGION_HIERARCHY = {
     }
 }
 
-# 3. 사이드바 UI (Secrets 연동 및 들여쓰기 교정 완료)
+# 3. 사이드바 UI (보안 완벽 차단: 화면에 키 노출 절대 없음)
 default_key = ""
 try:
     if "PUBLIC_DATA_KEY" in st.secrets:
@@ -59,12 +59,19 @@ except Exception:
 
 with st.sidebar:
     st.header("🔑 API 및 타깃 관할 설정")
-    user_api_key = st.text_input(
-        "공공데이터 API 인증키 (선택사항)",
-        value=default_key,
+    
+    # 화면에는 빈칸("")으로 두고, 플레이스홀더로만 안내
+    custom_key = st.text_input(
+        "개인 API 인증키 (선택사항)",
+        value="",
         type="password",
-        help="Secrets에 등록된 기본 인증키가 자동 적용됩니다. 별도 인증키가 있으신 경우에만 직접 입력하세요."
+        placeholder="시스템 기본키 연동 중 (입력 불필요)",
+        help="Secrets의 관리자 키가 서버에서 안전하게 자동 호출됩니다. 개인 키를 쓰실 분만 입력하세요."
     )
+    
+    # 사용자가 직접 입력한 키가 있으면 그것을 쓰고, 없으면 서버 Secrets 키를 내부 적용
+    user_api_key = custom_key.strip() if custom_key.strip() else default_key
+    
     selected_industry = st.selectbox("타깃 업종", list(API_URL_MAP.keys()), index=0)
     
     sido_choice = st.selectbox("광역 시·도 선택", list(REGION_HIERARCHY.keys()), index=0)
@@ -120,7 +127,7 @@ def fetch_single_page(clean_key, target_url, page):
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_all_data(api_key, industry_name, total_pages):
     if not api_key:
-        return None, "사이드바에 API 인증키를 입력하거나 Streamlit Secrets 설정을 확인해주세요."
+        return None, "인증키가 감지되지 않았습니다. 사이드바에 키를 입력하거나 Streamlit Secrets를 확인해주세요."
     
     clean_key = urllib.parse.unquote(api_key.strip())
     target_url = API_URL_MAP[industry_name]
@@ -140,7 +147,7 @@ def fetch_all_data(api_key, industry_name, total_pages):
         if dup_col:
             combined = combined.drop_duplicates(subset=[dup_col])
         return combined, None
-    return None, f"'{industry_name}' 데이터 수신에 실패했습니다. API 키를 확인해주세요."
+    return None, f"'{industry_name}' 데이터 수신에 실패했습니다. 키 권한 또는 포털 상태를 확인해주세요."
 
 # 6. 정밀 데이터 가공 및 지역 필터링
 def process_and_filter(df, sido, reg_name, code, active_only):
