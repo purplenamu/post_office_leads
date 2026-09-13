@@ -4,6 +4,7 @@ import requests
 import datetime
 import urllib.parse
 import xml.etree.ElementTree as ET
+import re
 
 st.set_page_config(page_title="우체국 B2B 법인 결제계좌 알리미", layout="wide")
 
@@ -12,18 +13,18 @@ st.caption("공공데이터 실시간 API 연동 (부울경 지자체코드·주
 
 # 1. 5대 업종 API 엔드포인트
 API_URL_MAP = {
-    "의원": "https://apis.data.go.kr/1741000/clinics/info",
-    "병원": "https://apis.data.go.kr/1741000/hospitals/info",
     "건물위생관리업": "https://apis.data.go.kr/1741000/building_sanitation/info",
+    "소독업": "https://apis.data.go.kr/1741000/disinfection_companies/info",
     "승강기유지관리업체": "https://apis.data.go.kr/1741000/elevator_maintenance/info",
-    "소독업": "https://apis.data.go.kr/1741000/disinfection_companies/info"
+    "의원": "https://apis.data.go.kr/1741000/clinics/info",
+    "병원": "https://apis.data.go.kr/1741000/hospitals/info"
 }
 
 # 2. 공식 엑셀 기반 부울경 전체 자치단체코드 매핑
 REGION_HIERARCHY = {
     "부산광역시": {
-        "부산 사상구": "3390000", "부산 강서구": "3360000", "부산 북구": "3320000",
-        "부산 사하구": "3340000", "부산 부산진구": "3290000", "부산 동구": "3270000",
+        "부산 동구": "3270000", "부산 사상구": "3390000", "부산 강서구": "3360000",
+        "부산 북구": "3320000", "부산 사하구": "3340000", "부산 부산진구": "3290000",
         "부산 남구": "3310000", "부산 중구": "3250000", "부산 서구": "3260000",
         "부산 영도구": "3280000", "부산 동래구": "3300000", "부산 금정구": "3350000",
         "부산 연제구": "3370000", "부산 수영구": "3380000", "부산 해운대구": "3330000",
@@ -61,8 +62,8 @@ with st.sidebar:
     
     st.divider()
     st.subheader("🔍 전국 데이터 탐색 범위")
-    scan_pages = st.slider("자동 스캔 페이지 수 (페이지당 100건)", min_value=1, max_value=10, value=5,
-                           help="서버 1회 한도가 100건이므로 5페이지 설정 시 전국 최신 500건 중 관내 사업장을 추출합니다.")
+    scan_pages = st.slider("자동 스캔 페이지 수 (페이지당 100건)", min_value=1, max_value=10, value=10,
+                           help="서버 1회 한도가 100건이므로 10페이지 설정 시 전국 최신 1,000건 중 관내 사업장을 추출합니다.")
 
 # 4. 단일 페이지 호출 함수
 def fetch_single_page(clean_key, target_url, page):
@@ -123,7 +124,7 @@ def fetch_all_data(api_key, industry_name, total_pages):
         return combined, None
     return None, "데이터 수신에 실패했습니다. API 키를 확인해주세요."
 
-# 6. 정밀 데이터 가공 및 2중 지역 필터링 함수
+# 6. 정밀 데이터 가공 및 엄격한 지역 필터링 함수
 def process_and_filter(df, sido, reg_name, code, active_only):
     norm = {str(c).upper().replace("_", ""): c for c in df.columns}
     
@@ -175,42 +176,59 @@ def process_and_filter(df, sido, reg_name, code, active_only):
     if active_only and stts_col:
         df = df[df["영업상태명"].str.contains("영업|정상", na=False)]
 
-    # 개방자치단체코드 컬럼 확보
+    # 자치단체코드 컬럼 확보
     gov_col = norm.get("OPNATMYGRPCD", None)
     df["지자체코드"] = df[gov_col].astype(str).str.strip() if gov_col else ""
 
-    # --- 핵심: 2중 교차 정밀 지역 필터링 ---
-    filtered = pd.DataFrame()
-    
+    # --- 핵심: 동음이의어(동구, 서구, 남구, 북구) 방지 엄격 필터링 ---
+    busan_codes = set([str(c) for c in range(3250000, 3410000, 10000)] + ["6260000", "6260000_ALL"])
+    ulsan_codes = set([str(c) for c in range(3690000, 3740000, 10000)] + ["6310000", "6310000_ALL"])
+    gn_codes = set([
+        "5310000", "5330000", "5340000", "5350000", "5360000", "5370000", "5380000",
+        "5390000", "5400000", "5410000", "5420000", "5430000", "5440000", "5450000",
+        "5460000", "5470000", "5480000", "5670000", "6480000", "6480000_ALL"
+    ])
+
     if code == "BUULGYEONG_ALL":
-        # 부울경 전체
-        c_code = df["지자체코드"].str.startswith(("32", "33", "34", "36", "37", "53", "54", "56", "62", "63", "64"))
-        c_addr = df["사업장소재지"].str.contains("부산|울산|경남|경상남도", na=False)
+        c_code = df["지자체코드"].isin(busan_codes | ulsan_codes | gn_codes)
+        c_addr = df["사업장소재지"].str.contains(r"부산|울산|경남|경상남도", na=False)
         filtered = df[c_code | c_addr].copy()
         
     elif code == "BUSAN_ALL":
-        c_code = df["지자체코드"].str.startswith(("32", "33", "34", "626"))
-        c_addr = df["사업장소재지"].str.contains("부산", na=False)
+        c_code = df["지자체코드"].isin(busan_codes)
+        c_addr = df["사업장소재지"].str.contains(r"부산", na=False)
         filtered = df[c_code | c_addr].copy()
         
     elif code == "ULSAN_ALL":
-        c_code = df["지자체코드"].str.startswith(("36", "37", "631"))
-        c_addr = df["사업장소재지"].str.contains("울산", na=False)
+        c_code = df["지자체코드"].isin(ulsan_codes)
+        c_addr = df["사업장소재지"].str.contains(r"울산", na=False)
         filtered = df[c_code | c_addr].copy()
         
     elif code == "GYEONGNAM_ALL":
-        c_code = df["지자체코드"].str.startswith(("53", "54", "56", "648"))
-        c_addr = df["사업장소재지"].str.contains("경남|경상남도", na=False)
+        c_code = df["지자체코드"].isin(gn_codes)
+        c_addr = df["사업장소재지"].str.contains(r"경남|경상남도", na=False)
         filtered = df[c_code | c_addr].copy()
         
     else:
-        # 특정 단일 시·군·구 (예: 부산 사상구, 창원시 등)
-        target_gu = reg_name.split(" ")[-1]  # "사상구", "김해시" 등
+        # 단일 시·군·구 정밀 매칭 (예: '부산 동구', '부산 서구', '울산 동구' 등)
         c_code = (df["지자체코드"] == str(code))
-        c_addr = df["사업장소재지"].str.contains(target_gu, na=False)
+        
+        # 광역시/도 접두어 식별
+        if "부산" in sido or "부산" in reg_name:
+            sido_prefix = "부산"
+        elif "울산" in sido or "울산" in reg_name:
+            sido_prefix = "울산"
+        else:
+            sido_prefix = r"(?:경남|경상남도)"
+            
+        dist_name = reg_name.split(" ")[-1] # '동구', '서구', '사상구', '창원시'
+        
+        # 핵심 정규식: 시도 접두어 필수 + 다른 구 접두사(성동구, 강동구, 일산동구 등) 원천 차단
+        addr_regex = rf"{sido_prefix}.*(?<![가-힣]){dist_name}(?![가-힣])"
+        c_addr = df["사업장소재지"].str.contains(addr_regex, regex=True, na=False)
+        
         filtered = df[c_code | c_addr].copy()
 
-    # 최신 인허가일자 내림차순 정렬
     filtered = filtered.sort_values(by="인허가일자", ascending=False)
     return filtered
 
@@ -226,8 +244,11 @@ if user_api_key:
         # B2B 추천 전략 부여
         if selected_industry in ["병원", "의원"]:
             filtered_df["추천 우체국 상품"] = "요양급여 결제계좌 + 100% 국가보장 MMDA"
+            focus_product = "요양급여/MMDA"
         else:
             filtered_df["추천 우체국 상품"] = "대량 급여이체 수수료 평생면제 + 법인MMDA"
+            focus_product = "대량 급여이체/MMDA"
+            
         filtered_df["영업상태"] = "접촉 전"
         
         # 상단 요약 카드
@@ -235,7 +256,7 @@ if user_api_key:
         c1.metric(f"{selected_region_name} 발굴", f"{len(filtered_df)} 개소")
         tot_emp = filtered_df["종업원(의료인)수"].sum() if not filtered_df.empty else 0
         c2.metric("잠재 급여이체 대상", f"{tot_emp:,} 명")
-        c3.metric("중점 유치 상품", "요양급여/급여통장")
+        c3.metric("중점 유치 상품", focus_product)
         c4.metric("전국 스캔 모수", f"{len(raw_df):,} 건")
         
         st.divider()
@@ -270,11 +291,7 @@ if user_api_key:
             )
         else:
             st.warning(f"전국 최신 {len(raw_df):,}건 중 '{selected_region_name}' 소재 {selected_industry} 사업장이 없습니다.")
-            st.info("""
-            💡 **데이터 확인 요령:**
-            * **병원은 전국 신규 개설 자체가 매우 드뭅니다.** 타깃 업종을 모수가 많은 **`의원`**이나 **`소독업`**으로 변경해 보세요.
-            * 관할 구역을 **`부산 전체`** 또는 **`부울경 전체 권역`**으로 넓히시면 부울경 소재 최신 사업장들이 즉시 추출됩니다.
-            """)
+            st.info("💡 사이드바에서 **[부산 전체]**를 선택하시면 부산 전역의 최신 인허가 목록을 한눈에 보실 수 있습니다.")
     else:
         st.warning("데이터를 가져오지 못했습니다.")
 else:
