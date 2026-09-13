@@ -1,15 +1,16 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import requests
 import datetime
 import urllib.parse
 import xml.etree.ElementTree as ET
-import math
+import re
 
 st.set_page_config(page_title="우체국 B2B 법인 결제계좌 알리미", layout="wide")
 
 st.title("📮 우체국 B2B 법인 결제계좌 & 급여이체 알리미")
-st.caption("공공데이터 실시간 API 연동 (정상영업 필터 · 지도 위치 시각화 탑재)")
+st.caption("공공데이터 실시간 API 연동 (부울경 전역 16칸 우편 라벨지 출력 탑재)")
 
 # 1. 5대 업종 API 엔드포인트
 API_URL_MAP = {
@@ -20,7 +21,7 @@ API_URL_MAP = {
     "병원": "https://apis.data.go.kr/1741000/hospitals/info"
 }
 
-# 2. 부울경 전체 자치단체코드 매핑
+# 2. 공식 엑셀 기반 부울경 전체 자치단체코드 매핑
 REGION_HIERARCHY = {
     "부산광역시": {
         "부산 동구": "3270000", "부산 사상구": "3390000", "부산 강서구": "3360000",
@@ -58,94 +59,19 @@ with st.sidebar:
     selected_region_name = st.selectbox("관할 시·군·구 선택", list(REGION_HIERARCHY[sido_choice].keys()), index=0)
     target_code = REGION_HIERARCHY[sido_choice][selected_region_name]
     
-    st.success("🔒 **영업/정상 사업장만 자동 선별** (폐업·휴업 원천 차단)")
+    only_active = st.checkbox("영업/정상 사업장만 조회", value=True)
     
     st.divider()
     st.subheader("🔍 전국 데이터 탐색 범위")
     scan_pages = st.slider("자동 스캔 페이지 수 (페이지당 100건)", min_value=1, max_value=10, value=10)
 
-# 4. 공공데이터 좌표(TM/GRS80/Bessel) -> WGS84 위경도 변환 엔진
-def tm_to_wgs84(x_val, y_val):
-    try:
-        if pd.isna(x_val) or pd.isna(y_val):
-            return None, None
-        x = float(str(x_val).strip())
-        y = float(str(y_val).strip())
-        if x <= 0 or y <= 0:
-            return None, None
-        
-        # 이미 WGS84 좌표계인 경우
-        if 124.0 <= x <= 132.0 and 33.0 <= y <= 39.0:
-            return round(y, 6), round(x, 6)
-        if 124.0 <= y <= 132.0 and 33.0 <= x <= 39.0:
-            return round(x, 6), round(y, 6)
-            
-        # 행안부 표준 TM 중부원점(Bessel 1841) 좌표 변환
-        if x > 10000 and y > 10000:
-            a = 6377397.155
-            f = 1 / 299.1528128
-            b = a * (1 - f)
-            e2 = (a**2 - b**2) / (a**2)
-            e_prime2 = (a**2 - b**2) / (b**2)
-            
-            lat0 = math.radians(38.0)
-            lon0 = math.radians(127.0028902777778)
-            x0 = 200000.0
-            y0 = 500000.0
-            k0 = 1.0
-            
-            dx = x - x0
-            dy = y - y0
-            
-            e4 = e2 * e2
-            e6 = e4 * e2
-            A0 = 1 - (e2 / 4) - (3 * e4 / 64) - (5 * e6 / 256)
-            A2 = (3 / 8) * (e2 + (e4 / 4) + (15 * e6 / 128))
-            A4 = (15 / 256) * (e4 + (3 * e6 / 4))
-            A6 = 35 * e6 / 3072
-            
-            M0 = a * (A0 * lat0 - A2 * math.sin(2 * lat0) + A4 * math.sin(4 * lat0) - A6 * math.sin(6 * lat0))
-            M = M0 + dy / k0
-            
-            e1 = (1 - math.sqrt(1 - e2)) / (1 + math.sqrt(1 - e2))
-            mu = M / (a * (1 - e2 / 4 - 3 * e4 / 64 - 5 * e6 / 256))
-            
-            phi1 = mu + (3 * e1 / 2 - 27 * e1**3 / 32) * math.sin(2 * mu) + \
-                   (21 * e1**2 / 16 - 55 * e1**4 / 32) * math.sin(4 * mu) + \
-                   (151 * e1**3 / 96) * math.sin(6 * mu) + (1097 * e1**4 / 512) * math.sin(8 * mu)
-                   
-            C1 = e_prime2 * math.cos(phi1)**2
-            T1 = math.tan(phi1)**2
-            N1 = a / math.sqrt(1 - e2 * math.sin(phi1)**2)
-            R1 = a * (1 - e2) / ((1 - e2 * math.sin(phi1)**2)**1.5)
-            D = dx / (N1 * k0)
-            
-            phi = phi1 - (N1 * math.tan(phi1) / R1) * (
-                D**2 / 2 - (5 + 3 * T1 + 10 * C1 - 4 * C1**2 - 9 * e_prime2) * D**4 / 24 +
-                (61 + 90 * T1 + 298 * C1 + 45 * T1**2 - 252 * e_prime2 - 3 * C1**2) * D**6 / 720
-            )
-            lam = lon0 + (
-                D - (1 + 2 * T1 + C1) * D**3 / 6 +
-                (5 - 2 * C1 + 28 * T1 - 3 * C1**2 + 8 * e_prime2 + 24 * T1**2) * D**5 / 120
-            ) / math.cos(phi1)
-            
-            lat_wgs = math.degrees(phi) - 0.0030
-            lon_wgs = math.degrees(lam) + 0.0024
-            
-            if 33.0 <= lat_wgs <= 39.0 and 124.0 <= lon_wgs <= 132.0:
-                return round(lat_wgs, 6), round(lon_wgs, 6)
-    except Exception:
-        pass
-    return None, None
-
-# 5. API 호출 함수
+# 4. 단일 페이지 호출
 def fetch_single_page(clean_key, target_url, page):
     params = {
         "serviceKey": clean_key,
         "pageNo": str(page),
         "numOfRows": "100",
-        "resultType": "json",
-        "salsSttsCd": "01"  # API 레벨에서 1차 정상영업만 필터
+        "resultType": "json"
     }
     try:
         res = requests.get(target_url, params=params, timeout=(10, 30))
@@ -172,6 +98,7 @@ def fetch_single_page(clean_key, target_url, page):
         return None
     return None
 
+# 5. 다중 페이지 수집 함수 (캐싱 적용)
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_all_data(api_key, industry_name, total_pages):
     if not api_key:
@@ -181,7 +108,7 @@ def fetch_all_data(api_key, industry_name, total_pages):
     target_url = API_URL_MAP[industry_name]
     
     all_dfs = []
-    pbar = st.progress(0, text="공공데이터 서버에서 전국 최신 정상영업 데이터 수집 중...")
+    pbar = st.progress(0, text="공공데이터 서버에서 전국 최신 데이터 수집 중...")
     for p in range(1, total_pages + 1):
         pbar.progress(p / total_pages, text=f"전국 데이터 {p}/{total_pages} 페이지 수집 중...")
         pdf = fetch_single_page(clean_key, target_url, p)
@@ -197,21 +124,10 @@ def fetch_all_data(api_key, industry_name, total_pages):
         return combined, None
     return None, "데이터 수신에 실패했습니다. API 키를 확인해주세요."
 
-# 6. 정밀 데이터 가공 및 정상영업/지역 2중 필터링
-def process_and_filter(df, sido, reg_name, code):
+# 6. 정밀 데이터 가공 및 지역 필터링
+def process_and_filter(df, sido, reg_name, code, active_only):
     norm = {str(c).upper().replace("_", ""): c for c in df.columns}
     
-    # 1) 영업/정상 사업장만 엄격 선별 (폐업, 휴업, 취소 완전 차단)
-    stts_name_col = norm.get("SALSSTTSNM", norm.get("DTLSALSSTTSNM", None))
-    stts_cd_col = norm.get("SALSSTTSCD", norm.get("DTLSALSSTTSCD", None))
-    
-    if stts_name_col:
-        cond_active = df[stts_name_col].astype(str).str.contains("영업|정상", na=False) & \
-                     ~df[stts_name_col].astype(str).str.contains("폐업|휴업|취소|말소|정지", na=False)
-        df = df[cond_active].copy()
-    elif stts_cd_col:
-        df = df[df[stts_cd_col].astype(str).str.strip().isin(["01", "1"])].copy()
-
     # 상호명
     name_col = norm.get("BPLCNM", df.columns[0])
     df["사업장명"] = df[name_col].astype(str).str.strip()
@@ -246,6 +162,22 @@ def process_and_filter(df, sido, reg_name, code):
         df["사업장소재지"] = "주소 확인 필요"
     df["사업장소재지"] = df["사업장소재지"].fillna("주소 확인 필요")
 
+    # 우편번호 (도로명/지번 우편번호 통합)
+    zr_col = norm.get("ROADNMZIP", None)
+    zl_col = norm.get("LCTNZIP", None)
+    s_zr = df[zr_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if zr_col else None
+    s_zl = df[zl_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if zl_col else None
+    
+    if s_zr is not None and s_zl is not None:
+        df["우편번호"] = s_zr.combine_first(s_zl)
+    elif s_zr is not None:
+        df["우편번호"] = s_zr
+    elif s_zl is not None:
+        df["우편번호"] = s_zl
+    else:
+        df["우편번호"] = "-"
+    df["우편번호"] = df["우편번호"].fillna("-")
+
     # 종업원(의료인)수
     emp_col = norm.get("HCWKRCNT", None)
     df["종업원(의료인)수"] = pd.to_numeric(df[emp_col], errors="coerce").fillna(0).astype(int) if emp_col else 0
@@ -254,16 +186,11 @@ def process_and_filter(df, sido, reg_name, code):
     tel_col = norm.get("TELNO", None)
     df["전화번호"] = df[tel_col].astype(str).str.strip().replace(["", "None", "nan", "null"], "-") if tel_col else "-"
 
-    # 좌표 변환 (지도용)
-    cx_col = norm.get("CRDINFOX", None)
-    cy_col = norm.get("CRDINFOY", None)
-    if cx_col and cy_col:
-        coords = [tm_to_wgs84(x, y) for x, y in zip(df[cx_col], df[cy_col])]
-        df["latitude"] = [c[0] for c in coords]
-        df["longitude"] = [c[1] for c in coords]
-    else:
-        df["latitude"] = None
-        df["longitude"] = None
+    # 영업상태
+    stts_col = norm.get("SALSSTTSNM", norm.get("DTLSALSSTTSNM", None))
+    df["영업상태명"] = df[stts_col].astype(str).str.strip() if stts_col else "정상"
+    if active_only and stts_col:
+        df = df[df["영업상태명"].str.contains("영업|정상", na=False)]
 
     # 자치단체코드 필터링
     gov_col = norm.get("OPNATMYGRPCD", None)
@@ -310,83 +237,189 @@ def process_and_filter(df, sido, reg_name, code):
     filtered = filtered.sort_values(by="인허가일자", ascending=False)
     return filtered
 
-# 7. 화면 표출부
+# 7. 16칸 라벨지 (A4 / 2열 8행 - 폼텍 3107 호환) HTML 생성기
+def generate_16_labels_html(df_target):
+    html = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>우체국 B2B DM 우편 발송 라벨 (16칸)</title>
+<style>
+  @page {
+    size: A4 portrait;
+    margin: 12.5mm 5.9mm;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+    background: #ffffff;
+  }
+  .print-bar {
+    text-align: center;
+    padding: 12px;
+    background: #f1f3f5;
+    border-bottom: 1px solid #ced4da;
+    margin-bottom: 15px;
+  }
+  .print-btn {
+    background-color: #d32f2f;
+    color: white;
+    padding: 10px 24px;
+    font-size: 15px;
+    font-weight: bold;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  @media print {
+    .print-bar { display: none; }
+  }
+  .page {
+    width: 198.2mm;
+    height: 272mm;
+    display: grid;
+    grid-template-columns: 99.1mm 99.1mm;
+    grid-template-rows: repeat(8, 34mm);
+    page-break-after: always;
+  }
+  .label-box {
+    width: 99.1mm;
+    height: 34mm;
+    padding: 3.5mm 6mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    overflow: hidden;
+    line-height: 1.35;
+  }
+  .zipcode {
+    font-size: 11px;
+    font-weight: bold;
+    color: #0b5394;
+    letter-spacing: 1px;
+    margin-bottom: 2px;
+  }
+  .address {
+    font-size: 10.5px;
+    color: #212529;
+    word-break: keep-all;
+    margin-bottom: 3px;
+  }
+  .company {
+    font-size: 12.5px;
+    font-weight: bold;
+    color: #000000;
+  }
+</style>
+</head>
+<body>
+<div class="print-bar">
+  <button class="print-btn" onclick="window.print()">🖨️ 16칸 라벨지 바로 인쇄 (Ctrl + P)</button>
+  <p style="margin: 6px 0 0 0; font-size: 12px; color: #495057;">
+    * 브라우저 인쇄 설정에서 <b>여백: 없음(None)</b> 및 <b>배율: 100% (기본값)</b>으로 지정하시면 16칸 라벨지에 정확히 출력됩니다.
+  </p>
+</div>
+"""
+    records = df_target.to_dict('records')
+    for i in range(0, len(records), 16):
+        chunk = records[i:i+16]
+        html += '<div class="page">\n'
+        for item in chunk:
+            zip_val = item.get('우편번호', '-')
+            addr_val = item.get('사업장소재지', '-')
+            comp_val = item.get('사업장명', '-')
+            html += f"""  <div class="label-box">
+    <div class="zipcode">[{zip_val}]</div>
+    <div class="address">{addr_val}</div>
+    <div class="company">{comp_val} <span style="font-weight: normal; font-size: 11px; color: #495057;">대표님 귀하</span></div>
+  </div>\n"""
+        # 16칸 그리드 틀 유지를 위한 빈칸 패딩
+        for _ in range(16 - len(chunk)):
+            html += '  <div class="label-box"></div>\n'
+        html += '</div>\n'
+
+    html += "</body></html>"
+    return html
+
+# 8. 메인 화면 표출부
 if user_api_key:
     raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, scan_pages)
     
     if err_msg:
         st.error(err_msg)
     elif raw_df is not None and not raw_df.empty:
-        filtered_df = process_and_filter(raw_df, sido_choice, selected_region_name, target_code)
+        filtered_df = process_and_filter(raw_df, sido_choice, selected_region_name, target_code, only_active)
+        filtered_df["영업상태"] = "접촉 전"
         
         # 상단 요약 카드
-        is_medical = selected_industry in ["병원", "의원"]
-        focus_prod = "요양급여/MMDA" if is_medical else "대량 급여이체/MMDA"
-        
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric(f"{selected_region_name} 정상영업 발굴", f"{len(filtered_df)} 개소")
+        c1.metric(f"{selected_region_name} 발굴", f"{len(filtered_df)} 개소")
         tot_emp = filtered_df["종업원(의료인)수"].sum() if not filtered_df.empty else 0
         c2.metric("잠재 급여이체 대상", f"{tot_emp:,} 명")
-        c3.metric("중점 유치 대상", focus_prod)
-        c4.metric("자금 안전성", "100% 국가 전액보장")
+        c3.metric("중점 유치 대상", "대량 급여계좌" if selected_industry not in ["병원", "의원"] else "요양급여 계좌")
+        c4.metric("전국 스캔 모수", f"{len(raw_df):,} 건")
         
         st.divider()
         
-        # --- 상품 유치 전략 가이드 블록 ---
-        with st.expander(f"💡 [우체국 B2B 세일즈 플레이북] {selected_industry} 맞춤 유치 전략", expanded=True):
-            if is_medical:
-                st.markdown("""
-                * **1. 건강보험공단 요양급여 결제계좌 지정 유치**: 병원·의원 최대 현금 유입 통로인 건보공단 지급계좌를 우체국으로 지정하도록 유도합니다.
-                * **2. 법인 MMDA (단기 유동자금 운용)**: 요양급여 입금 후 의약품 대금 결제, 급여일 전까지 며칠간 머무는 단기 자금을 하루만 맡겨도 고금리를 제공하는 법인 MMDA로 유치합니다.
-                * **3. 원금·이자 100% 국가 전액보장 소구**: 일반 시중은행의 5천만 원 예금자보호 한도와 차별화하여 국가 전액 지급보증 안전성을 핵심 셀링포인트로 강조합니다.
-                * **4. 의료인·직원 급여이체 연계**: 병원 결제계좌 개설과 동시에 간호사, 조무사, 원무과 직원의 급여통장 유치(타행 이체수수료 평생 면제 혜택)를 패키지로 제안합니다.
-                """)
-            else:
-                st.markdown("""
-                * **1. 대량 급여이체 수수료 평생 면제**: 청소·소독·승강기 정비 기사 등 다수 현장 근로자 급여 일괄 이체 시 건당 수수료 0원 혜택으로 연간 금융비용 절감 효과를 제시합니다.
-                * **2. 아파트·빌딩 관리용역 대금 수납 전용계좌**: 아파트 입대의나 빌딩 관리단으로부터 정기 입금받는 용역대금 수납 계좌를 우체국으로 단일화하도록 유도합니다.
-                * **3. 기업 인터넷뱅킹 이체수수료 전액 면제**: 자재 구매, 외주비 송금 등 법인 결제성 이체 수수료를 전액 면제하여 주거래 은행 전환 장벽을 제거합니다.
-                * **4. 법인 MMDA 예비비 운용**: 매월 적립되는 퇴직급여 충당금 및 장기수선/소모품 구매 예비 자금을 수시입출식 고금리 MMDA로 운용하도록 제안합니다.
-                """)
-        
-        # --- 위치 지도 표출 ---
-        map_df = filtered_df.dropna(subset=["latitude", "longitude"])
-        if not map_df.empty:
-            st.subheader(f"🗺️ {selected_region_name} 사업장 위치 분포 ({len(map_df)}개소 지도 표시)")
-            st.map(map_df[["latitude", "longitude"]], zoom=12, use_container_width=True)
-        
-        # --- 메인 데이터 테이블 (추천 우체국 상품 컬럼 제거) ---
+        # 데이터 에디터 (추천 우체국 상품 삭제, 우편번호 추가)
         if not filtered_df.empty:
-            filtered_df["진행 단계"] = "접촉 전"
-            view_cols = ["인허가일자", "사업장명", "종업원(의료인)수", "전화번호", "사업장소재지", "진행 단계"]
-            
-            st.subheader(f"📋 {selected_region_name} {selected_industry} 명부 ({len(filtered_df)}건)")
+            view_cols = ["인허가일자", "사업장명", "우편번호", "사업장소재지", "종업원(의료인)수", "전화번호", "영업상태"]
+            st.subheader(f"📋 {selected_region_name} {selected_industry} 실시간 명부 ({len(filtered_df)}건 확보)")
             
             edited_df = st.data_editor(
                 filtered_df[view_cols],
                 column_config={
                     "인허가일자": st.column_config.TextColumn("개설(인허가)일자"),
+                    "우편번호": st.column_config.TextColumn("우편번호"),
                     "종업원(의료인)수": st.column_config.NumberColumn("종업원(의료인)수", format="%d명"),
-                    "진행 단계": st.column_config.SelectboxColumn(
-                        "영업 진행 단계",
+                    "영업상태": st.column_config.SelectboxColumn(
+                        "영업 단계",
                         options=["접촉 전", "전화(TM) 완료", "방문 예정", "상담 진행중", "계좌 개설 완료", "보류"],
                         required=True
                     )
                 },
-                disabled=["인허가일자", "사업장명", "종업원(의료인)수", "전화번호", "사업장소재지"],
+                disabled=["인허가일자", "사업장명", "우편번호", "사업장소재지", "종업원(의료인)수", "전화번호"],
                 hide_index=True,
                 use_container_width=True
             )
             
-            csv_data = edited_df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(
-                label=f"📥 {selected_region_name} {selected_industry} 영업 리스트(CSV) 다운로드",
-                data=csv_data,
-                file_name=f"우체국_B2B_{selected_industry}_{selected_region_name}_{datetime.date.today()}.csv",
-                mime="text/csv"
-            )
+            st.divider()
+
+            # --- 16칸 주소 라벨지 생성 섹션 (접촉 전 업체 전용) ---
+            pre_contact_df = edited_df[edited_df["영업상태"] == "접촉 전"]
+            
+            st.subheader("🖨️ 16칸 DM 주소 라벨 인쇄 (접촉 전 업체 대상)")
+            
+            if not pre_contact_df.empty:
+                req_pages = (len(pre_contact_df) + 15) // 16
+                m1, m2, m3 = st.columns(3)
+                m1.metric("라벨 출력 대상", f"{len(pre_contact_df)} 건")
+                m2.metric("필요 16칸 라벨지(A4)", f"{req_pages} 장")
+                m3.metric("규격 호환", "폼텍 3107 / 2열 8행")
+                
+                label_html_content = generate_16_labels_html(pre_contact_df)
+                
+                # 라벨 인쇄용 파일 다운로드 버튼
+                st.download_button(
+                    label=f"📄 {selected_region_name} '접촉 전' 16칸 주소라벨 파일(HTML) 다운로드 / 인쇄",
+                    data=label_html_content,
+                    file_name=f"우체국_16주소라벨_{selected_region_name}_{datetime.date.today()}.html",
+                    mime="text/html"
+                )
+                
+                st.caption("💡 **인쇄 요령:** 다운로드한 HTML 파일을 열고 상단 **[16칸 라벨지 바로 인쇄]** 버튼을 누르세요. 인쇄 창에서 **'여백: 없음'**, **'배율: 100%'**로 설정하시면 16칸 라벨지에 오차 없이 출력됩니다.")
+                
+                with st.expander("👀 16칸 라벨 인쇄 화면 미리보기"):
+                    components.html(label_html_content, height=450, scrolling=True)
+            else:
+                st.info("현재 모든 업체의 진행 단계가 변경되어 '접촉 전' 상태인 업체가 없습니다.")
+                
         else:
-            st.warning(f"전국 최신 정상영업 사업장 중 '{selected_region_name}' 소재 {selected_industry} 사업장이 없습니다.")
+            st.warning(f"전국 최신 {len(raw_df):,}건 중 '{selected_region_name}' 소재 {selected_industry} 사업장이 없습니다.")
     else:
         st.warning("데이터를 가져오지 못했습니다.")
 else:
