@@ -21,19 +21,6 @@ API_URL_MAP = {
     "소독업": "https://apis.data.go.kr/1741000/disinfection_companies/info"
 }
 
-FALLBACK_URL_MAP = {
-    "식품제조가공업": [
-        "https://apis.data.go.kr/1741000/food_manufacturing_process/info",
-        "https://apis.data.go.kr/1741000/food_manufacturing/info",
-        "https://apis.data.go.kr/1741000/food_manufacture/info"
-    ],
-    "건설폐기물처리업": [
-        "https://apis.data.go.kr/1741000/construction_waste_treatment/info",
-        "https://apis.data.go.kr/1741000/construction_waste/info",
-        "https://apis.data.go.kr/1741000/construction_waste_disposal/info"
-    ]
-}
-
 # 2. 공식 엑셀 기반 부울경 전체 자치단체코드 매핑
 REGION_HIERARCHY = {
     "부산광역시": {
