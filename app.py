@@ -16,9 +16,9 @@ st.caption("공공데이터 실시간 API 연동 (부울경 전역 16칸 라벨�
 API_URL_MAP = {
     "건물위생관리업": "https://apis.data.go.kr/1741000/building_sanitation/info",
     "소독업": "https://apis.data.go.kr/1741000/disinfection_companies/info",
-    "승강기유지관리업체": "https://apis.data.go.kr/1741000/elevator_maintenance/info",
     "의원": "https://apis.data.go.kr/1741000/clinics/info",
-    "병원": "https://apis.data.go.kr/1741000/hospitals/info"
+    "식품제조가공업": "https://apis.data.go.kr/1741000/food_manufacturing_processors/info"
+    "건설폐기물처리업": "https://apis.data.go.kr/1741000/construction_waste_disposal/info"
 }
 
 # 2. 공식 엑셀 기반 부울경 전체 자치단체코드 매핑
