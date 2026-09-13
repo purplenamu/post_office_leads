@@ -9,7 +9,7 @@ import re
 
 st.set_page_config(page_title="우체국 B2B 신규 법인 결제계좌 알리미", layout="wide")
 
-st.title("📮 우체국 B2B 법인 결제계좌 & 급여이체 알리미")
+st.title("📮 우체국 B2B 신규 법인 결제계좌 & 급여이체 알리미")
 st.caption("공공데이터 실시간 API 연동 (부울경 전역 16칸 우편 라벨지 출력 탑재)")
 
 # 1. 5대 업종 API 엔드포인트
