@@ -50,9 +50,9 @@ REGION_HIERARCHY = {
 }
 
 # 3. 사이드바 UI
-with st.sidebar:
-    st.header("🔑 API 및 타깃 관할 설정")
-    user_api_key = st.text_input("공공데이터 API 인증키", type="password")
+with st.sidebar:# 사용자가 직접 입력하면 그 키를 쓰고, 비워두면 시스템 Secrets 키를 자동 적용
+default_key = st.secrets.get("PUBLIC_DATA_KEY", "")
+user_api_key = st.sidebar.text_input("공공데이터 API 인증키 (선택사항)", value=default_key, type="password")
     selected_industry = st.selectbox("타깃 업종", list(API_URL_MAP.keys()), index=0)
     
     sido_choice = st.selectbox("광역 시·도 선택", list(REGION_HIERARCHY.keys()), index=0)
