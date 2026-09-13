@@ -12,28 +12,6 @@ st.set_page_config(page_title="우체국 B2B 법인 결제계좌 알리미", lay
 st.title("📮 우체국 B2B 법인 결제계좌 & 급여이체 알리미")
 st.caption("공공데이터 실시간 API 공식 연동 (부울경 5대 전략업종 직통 시스템)")
 
-st.divider()
-    st.subheader("🔍 전국 데이터 탐색 범위 (기간 확대)")
-    
-    # 1. 탐색 시작 페이지 (과거 시점 점프용)
-    start_page = st.number_input(
-        "탐색 시작 페이지", 
-        min_value=1, 
-        max_value=50, 
-        value=1, 
-        step=10,
-        help="1페이지는 최근 1~2개월(2026년 8~9월)이며, 11페이지·21페이지로 올리면 2026년 상반기 및 2025년 데이터로 이동합니다."
-    )
-    
-    # 2. 수집 페이지 수 (최대 30페이지 = 3,000건)
-    scan_pages = st.slider(
-        "수집할 페이지 수 (페이지당 100건)", 
-        min_value=5, 
-        max_value=30, 
-        value=15,
-        help="15페이지(1,500건)~30페이지(3,000건)로 늘리면 구별 인허가 모수가 크게 늘어납니다."
-    )
-
 # 1. 공식 승인 5대 업종 직통 엔드포인트
 API_URL_MAP = {
     "식품제조가공업": "https://apis.data.go.kr/1741000/food_manufacturing_processors/info",
@@ -84,10 +62,24 @@ with st.sidebar:
     only_active = st.checkbox("영업/정상 사업장만 조회", value=True)
     
     st.divider()
-    st.subheader("🔍 전국 데이터 탐색 범위")
-    scan_pages = st.slider("자동 스캔 페이지 수 (페이지당 100건)", min_value=1, max_value=10, value=10)
+    st.subheader("🔍 데이터 탐색 범위 (기간 확대)")
+    start_page = st.number_input(
+        "탐색 시작 페이지",
+        min_value=1,
+        max_value=100,
+        value=1,
+        step=5,
+        help="1페이지는 최근 등록 건이며, 11·21·31페이지로 올리면 과거 등록 사업장으로 거슬러 올라갑니다."
+    )
+    scan_pages = st.slider(
+        "연속 수집 페이지 수 (페이지당 100건)",
+        min_value=5,
+        max_value=30,
+        value=15,
+        help="15페이지 설정 시 1,500건, 30페이지 설정 시 3,000건을 연속 스캔하여 구별 모수를 늘립니다."
+    )
 
-# 4. 단일 페이지 호출 함수 (공식 단일 엔드포인트 직통 호출)
+# 4. 단일 페이지 호출 함수
 def fetch_single_page(clean_key, target_url, page):
     params = {
         "serviceKey": clean_key,
@@ -120,9 +112,9 @@ def fetch_single_page(clean_key, target_url, page):
         return None
     return None
 
-# 5. 다중 페이지 수집 함수 (캐싱 적용)
+# 5. 다중 페이지 수집 함수 (시작 페이지 ~ 종료 페이지)
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_all_data(api_key, industry_name, total_pages):
+def fetch_all_data(api_key, industry_name, start_p, total_pages):
     if not api_key:
         return None, "사이드바에 API 인증키를 입력해주세요."
     
@@ -130,10 +122,13 @@ def fetch_all_data(api_key, industry_name, total_pages):
     target_url = API_URL_MAP[industry_name]
     
     all_dfs = []
-    for p in range(1, total_pages + 1):
+    pbar = st.progress(0, text=f"전국 데이터 탐색 중 ({start_p} ~ {start_p + total_pages - 1} 페이지)...")
+    for idx, p in enumerate(range(start_p, start_p + total_pages)):
+        pbar.progress((idx + 1) / total_pages, text=f"전국 데이터 수집 중 ({p}페이지 / 총 {total_pages}장)...")
         pdf = fetch_single_page(clean_key, target_url, p)
         if pdf is not None and not pdf.empty:
             all_dfs.append(pdf)
+    pbar.empty()
     
     if all_dfs:
         combined = pd.concat(all_dfs, ignore_index=True)
@@ -197,9 +192,17 @@ def process_and_filter(df, sido, reg_name, code, active_only):
         df["우편번호"] = "-"
     df["우편번호"] = df["우편번호"].fillna("-")
 
-    # 종업원(의료인/근로자)수
-    emp_col = norm.get("HCWKRCNT", norm.get("TOTEMPLYCNT", norm.get("EMPLYCNT", None)))
-    df["종업원(의료인)수"] = pd.to_numeric(df[emp_col], errors="coerce").fillna(0).astype(int) if emp_col else 0
+    # 종업원수 (의료인 HCWKRCNT + 식품/제조 TOTEPNUM, EMPLYCO, TOTEMPLYCNT 등 전수 매핑)
+    emp_candidates = [
+        "HCWKRCNT", "TOTEPNUM", "EMPLYCO", "TOTEMPLYCNT", "EMPLYCNT",
+        "HOFFEPNUM", "FCTYEPNUM", "MNPWRCNT", "TOTWORKMANCNT"
+    ]
+    emp_col = None
+    for cand in emp_candidates:
+        if cand in norm:
+            emp_col = norm[cand]
+            break
+    df["종업원(근로자)수"] = pd.to_numeric(df[emp_col], errors="coerce").fillna(0).astype(int) if emp_col else 0
 
     # 전화번호
     tel_col = norm.get("TELNO", None)
@@ -377,31 +380,14 @@ tab1, tab2 = st.tabs(["📋 실시간 명부 & 라벨 출력", "📊 지역별 5
 with tab1:
     if user_api_key:
         with st.spinner(f"'{selected_region_name}'의 '{selected_industry}' 데이터를 수집 중입니다..."):
-            raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, scan_pages)
+            raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, start_page, scan_pages)
         
         if err_msg:
             st.error(err_msg)
         elif raw_df is not None and not raw_df.empty:
             filtered_df = process_and_filter(raw_df, sido_choice, selected_region_name, target_code, only_active)
             filtered_df["영업상태"] = "접촉 전"
-
-            # 종업원수 컬럼 확장 (의료인, 일반제조 TOT_EP_NUM, EMPLY_CO, MNPWR_CNT 등 전체 지원)
-    emp_candidates = [
-        "HCWKRCNT", "TOTEPNUM", "EMPLYCO", "TOTEMPLYCNT", "EMPLYCNT", 
-        "HOFFEPNUM", "FCTYEPNUM", "MNPWRCNT", "TOTWORKMANCNT"
-    ]
-    emp_col = None
-    for cand in emp_candidates:
-        if cand in norm:
-            emp_col = norm[cand]
-            break
-
-    if emp_col:
-        df["종업원(근로자)수"] = pd.to_numeric(df[emp_col], errors="coerce").fillna(0).astype(int)
-    else:
-        df["종업원(근로자)수"] = 0
-
-        
+            
             if selected_industry == "의원":
                 focus_target = "요양급여 결제계좌"
             elif selected_industry == "식품제조가공업":
@@ -413,15 +399,15 @@ with tab1:
                 
             c1, c2, c3, c4 = st.columns(4)
             c1.metric(f"{selected_region_name} 발굴", f"{len(filtered_df)} 개소")
-            tot_emp = filtered_df["종업원(의료인)수"].sum() if not filtered_df.empty else 0
+            tot_emp = filtered_df["종업원(근로자)수"].sum() if not filtered_df.empty else 0
             c2.metric("잠재 급여이체 대상", f"{tot_emp:,} 명")
             c3.metric("중점 유치 대상", focus_target)
-            c4.metric("전국 스캔 모수", f"{len(raw_df):,} 건")
+            c4.metric(f"전국 스캔 모수 (p.{start_page}~)", f"{len(raw_df):,} 건")
             
             st.divider()
             
             if not filtered_df.empty:
-                view_cols = ["인허가일자", "사업장명", "우편번호", "사업장소재지", "종업원(의료인)수", "전화번호", "영업상태"]
+                view_cols = ["인허가일자", "사업장명", "우편번호", "사업장소재지", "종업원(근로자)수", "전화번호", "영업상태"]
                 st.subheader(f"📋 {selected_region_name} {selected_industry} 실시간 명부 ({len(filtered_df)}건 확보)")
                 
                 edited_df = st.data_editor(
@@ -429,14 +415,14 @@ with tab1:
                     column_config={
                         "인허가일자": st.column_config.TextColumn("개설(인허가)일자"),
                         "우편번호": st.column_config.TextColumn("우편번호"),
-                        "종업원(의료인)수": st.column_config.NumberColumn("종업원(의료인)수", format="%d명"),
+                        "종업원(근로자)수": st.column_config.NumberColumn("종업원(근로자)수", format="%d명"),
                         "영업상태": st.column_config.SelectboxColumn(
                             "영업 단계",
                             options=["접촉 전", "전화(TM) 완료", "방문 예정", "상담 진행중", "계좌 개설 완료", "보류"],
                             required=True
                         )
                     },
-                    disabled=["인허가일자", "사업장명", "우편번호", "사업장소재지", "종업원(의료인)수", "전화번호"],
+                    disabled=["인허가일자", "사업장명", "우편번호", "사업장소재지", "종업원(근로자)수", "전화번호"],
                     hide_index=True,
                     use_container_width=True
                 )
@@ -468,7 +454,8 @@ with tab1:
                 else:
                     st.info("현재 모든 업체의 진행 단계가 변경되어 '접촉 전' 상태인 업체가 없습니다.")
             else:
-                st.warning(f"전국 최신 {len(raw_df):,}건 중 '{selected_region_name}' 소재 {selected_industry} 사업장이 없습니다.")
+                st.warning(f"스캔 구간(전국 {len(raw_df):,}건) 중 '{selected_region_name}' 소재 {selected_industry} 사업장이 없습니다.")
+                st.info("💡 사이드바의 **[탐색 시작 페이지]**를 11, 21 등으로 올리거나 **[연속 수집 페이지 수]**를 20~30장으로 늘려 과거 등록 사업장을 탐색해 보세요.")
         else:
             st.warning("데이터를 가져오지 못했습니다.")
     else:
@@ -477,7 +464,7 @@ with tab1:
 # --- [TAB 2: 지역별 5대 업종 비교 분석 차트] ---
 with tab2:
     st.subheader(f"📊 '{selected_region_name}' 5대 타깃 업종 모수 비교 분석")
-    st.caption("새롭게 개편된 부울경 5대 전략 업종(식품제조·건설폐기물·의원·건물위생·소독)의 사업자 수와 근로자 규모를 실시간 집계합니다.")
+    st.caption("선택하신 관할 지역의 5대 업종별 사업자 수와 근로자 규모를 실시간 집계합니다.")
     
     if user_api_key:
         if st.button("🚀 5대 업종 분포 현황 집계 및 차트 생성", type="primary"):
@@ -487,11 +474,11 @@ with tab2:
             industries = list(API_URL_MAP.keys())
             for idx, ind_name in enumerate(industries):
                 progress_bar.progress((idx + 1) / len(industries), text=f"'{ind_name}' 데이터 수집 및 분석 중 ({idx+1}/{len(industries)})...")
-                raw_ind, _ = fetch_all_data(user_api_key, ind_name, scan_pages)
+                raw_ind, _ = fetch_all_data(user_api_key, ind_name, start_page, scan_pages)
                 if raw_ind is not None and not raw_ind.empty:
                     f_df = process_and_filter(raw_ind, sido_choice, selected_region_name, target_code, only_active)
                     cnt = len(f_df)
-                    emp_cnt = f_df["종업원(의료인)수"].sum() if not f_df.empty else 0
+                    emp_cnt = f_df["종업원(근로자)수"].sum() if not f_df.empty else 0
                 else:
                     cnt = 0
                     emp_cnt = 0
@@ -537,7 +524,7 @@ with tab2:
                 st.markdown("##### 👥 업종별 잠재 종업원 규모 (명)")
                 chart_emp = df_stat.set_index("업종")[["종업원수"]]
                 st.bar_chart(chart_emp, color="#d32f2f")
-                
+            
             st.divider()
             
             st.markdown("##### 📋 5대 업종 순위 및 영업 타깃 분석표")
@@ -548,13 +535,7 @@ with tab2:
                 "추천전략": "중점 유치 상품"
             })
             st.dataframe(display_stat, hide_index=True, use_container_width=True)
-            
-            st.info(f"""
-            💡 **{selected_region_name} B2B 타깃 영업 전략:**
-            * **제조·물류 공단 권역**: **'식품제조가공업'**과 **'건설폐기물처리업'**은 원자재 매입·매출 및 공사 기성금 수령 규모가 커 법인 MMDA(파킹통장) 평잔 유치에 최적입니다.
-            * **도심·생활 밀접 권역**: **'의원'**과 **'건물위생관리업'**은 정기 급여이체 및 건보 요양급여 결제계좌 유치 효과가 큽니다.
-            """)
         else:
-            st.info("👆 위 **[5대 업종 분포 현황 집계 및 차트 생성]** 버튼을 누르면 관할 구역 내 개편된 5대 업종의 현황을 일괄 집계합니다.")
+            st.info("👆 위 **[5대 업종 분포 현황 집계 및 차트 생성]** 버튼을 누르면 설정된 범위 내 5대 업종 현황을 집계합니다.")
     else:
         st.info("👈 사이드바에 공공데이터 API 인증키를 입력하세요.")
