@@ -12,6 +12,28 @@ st.set_page_config(page_title="우체국 B2B 법인 결제계좌 알리미", lay
 st.title("📮 우체국 B2B 법인 결제계좌 & 급여이체 알리미")
 st.caption("공공데이터 실시간 API 공식 연동 (부울경 5대 전략업종 직통 시스템)")
 
+st.divider()
+    st.subheader("🔍 전국 데이터 탐색 범위 (기간 확대)")
+    
+    # 1. 탐색 시작 페이지 (과거 시점 점프용)
+    start_page = st.number_input(
+        "탐색 시작 페이지", 
+        min_value=1, 
+        max_value=50, 
+        value=1, 
+        step=10,
+        help="1페이지는 최근 1~2개월(2026년 8~9월)이며, 11페이지·21페이지로 올리면 2026년 상반기 및 2025년 데이터로 이동합니다."
+    )
+    
+    # 2. 수집 페이지 수 (최대 30페이지 = 3,000건)
+    scan_pages = st.slider(
+        "수집할 페이지 수 (페이지당 100건)", 
+        min_value=5, 
+        max_value=30, 
+        value=15,
+        help="15페이지(1,500건)~30페이지(3,000건)로 늘리면 구별 인허가 모수가 크게 늘어납니다."
+    )
+
 # 1. 공식 승인 5대 업종 직통 엔드포인트
 API_URL_MAP = {
     "식품제조가공업": "https://apis.data.go.kr/1741000/food_manufacturing_processors/info",
@@ -362,7 +384,24 @@ with tab1:
         elif raw_df is not None and not raw_df.empty:
             filtered_df = process_and_filter(raw_df, sido_choice, selected_region_name, target_code, only_active)
             filtered_df["영업상태"] = "접촉 전"
-            
+
+            # 종업원수 컬럼 확장 (의료인, 일반제조 TOT_EP_NUM, EMPLY_CO, MNPWR_CNT 등 전체 지원)
+    emp_candidates = [
+        "HCWKRCNT", "TOTEPNUM", "EMPLYCO", "TOTEMPLYCNT", "EMPLYCNT", 
+        "HOFFEPNUM", "FCTYEPNUM", "MNPWRCNT", "TOTWORKMANCNT"
+    ]
+    emp_col = None
+    for cand in emp_candidates:
+        if cand in norm:
+            emp_col = norm[cand]
+            break
+
+    if emp_col:
+        df["종업원(근로자)수"] = pd.to_numeric(df[emp_col], errors="coerce").fillna(0).astype(int)
+    else:
+        df["종업원(근로자)수"] = 0
+
+        
             if selected_industry == "의원":
                 focus_target = "요양급여 결제계좌"
             elif selected_industry == "식품제조가공업":
