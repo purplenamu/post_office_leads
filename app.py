@@ -14,9 +14,9 @@ st.caption("공공데이터 실시간 API 연동 (부울경 특화 제조·폐�
 
 # 1. 부울경 특화 5대 타깃 업종 엔드포인트 및 우회 후보 URL
 API_URL_MAP = {
-    "식품제조가공업": "https://apis.data.go.kr/1741000/food_manufacturing_process/info",
-    "건설폐기물처리업": "https://apis.data.go.kr/1741000/construction_waste_treatment/info",
+    "식품제조가공업": "https://apis.data.go.kr/1741000/food_manufacturing_processors/info",
     "의원": "https://apis.data.go.kr/1741000/clinics/info",
+    "건설폐기물처리업": "https://apis.data.go.kr/1741000/construction_waste_disposal/info",
     "건물위생관리업": "https://apis.data.go.kr/1741000/building_sanitation/info",
     "소독업": "https://apis.data.go.kr/1741000/disinfection_companies/info"
 }
