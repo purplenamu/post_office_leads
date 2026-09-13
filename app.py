@@ -10,22 +10,35 @@ import re
 st.set_page_config(page_title="우체국 B2B 법인 결제계좌 알리미", layout="wide")
 
 st.title("📮 우체국 B2B 법인 결제계좌 & 급여이체 알리미")
-st.caption("공공데이터 실시간 API 연동 (부울경 전역 16칸 라벨지 & 5대 업종 분석 차트 탑재)")
+st.caption("공공데이터 실시간 API 연동 (부울경 특화 제조·폐기물·의료·용역 5대 업종)")
 
-# 1. 5대 업종 API 엔드포인트
+# 1. 부울경 특화 5대 타깃 업종 엔드포인트 및 우회 후보 URL
 API_URL_MAP = {
-    "건물위생관리업": "https://apis.data.go.kr/1741000/building_sanitation/info",
-    "소독업": "https://apis.data.go.kr/1741000/disinfection_companies/info",
+    "식품제조가공업": "https://apis.data.go.kr/1741000/food_manufacturing_process/info",
+    "건설폐기물처리업": "https://apis.data.go.kr/1741000/construction_waste_treatment/info",
     "의원": "https://apis.data.go.kr/1741000/clinics/info",
-    "식품제조가공업": "https://apis.data.go.kr/1741000/food_manufacturing_processors/info"
-    "건설폐기물처리업": "https://apis.data.go.kr/1741000/construction_waste_disposal/info"
+    "건물위생관리업": "https://apis.data.go.kr/1741000/building_sanitation/info",
+    "소독업": "https://apis.data.go.kr/1741000/disinfection_companies/info"
+}
+
+FALLBACK_URL_MAP = {
+    "식품제조가공업": [
+        "https://apis.data.go.kr/1741000/food_manufacturing_process/info",
+        "https://apis.data.go.kr/1741000/food_manufacturing/info",
+        "https://apis.data.go.kr/1741000/food_manufacture/info"
+    ],
+    "건설폐기물처리업": [
+        "https://apis.data.go.kr/1741000/construction_waste_treatment/info",
+        "https://apis.data.go.kr/1741000/construction_waste/info",
+        "https://apis.data.go.kr/1741000/construction_waste_disposal/info"
+    ]
 }
 
 # 2. 공식 엑셀 기반 부울경 전체 자치단체코드 매핑
 REGION_HIERARCHY = {
     "부산광역시": {
-        "부산 동구": "3270000", "부산 사상구": "3390000", "부산 강서구": "3360000",
-        "부산 북구": "3320000", "부산 사하구": "3340000", "부산 부산진구": "3290000",
+        "부산 사상구": "3390000", "부산 강서구": "3360000", "부산 북구": "3320000",
+        "부산 사하구": "3340000", "부산 부산진구": "3290000", "부산 동구": "3270000",
         "부산 남구": "3310000", "부산 중구": "3250000", "부산 서구": "3260000",
         "부산 영도구": "3280000", "부산 동래구": "3300000", "부산 금정구": "3350000",
         "부산 연제구": "3370000", "부산 수영구": "3380000", "부산 해운대구": "3330000",
@@ -53,7 +66,7 @@ REGION_HIERARCHY = {
 with st.sidebar:
     st.header("🔑 API 및 타깃 관할 설정")
     user_api_key = st.text_input("공공데이터 API 인증키", type="password")
-    selected_industry = st.selectbox("타깃 업종 (명부 조회용)", list(API_URL_MAP.keys()), index=0)
+    selected_industry = st.selectbox("타깃 업종", list(API_URL_MAP.keys()), index=0)
     
     sido_choice = st.selectbox("광역 시·도 선택", list(REGION_HIERARCHY.keys()), index=0)
     selected_region_name = st.selectbox("관할 시·군·구 선택", list(REGION_HIERARCHY[sido_choice].keys()), index=0)
@@ -65,37 +78,39 @@ with st.sidebar:
     st.subheader("🔍 전국 데이터 탐색 범위")
     scan_pages = st.slider("자동 스캔 페이지 수 (페이지당 100건)", min_value=1, max_value=10, value=10)
 
-# 4. 단일 페이지 호출
-def fetch_single_page(clean_key, target_url, page):
-    params = {
-        "serviceKey": clean_key,
-        "pageNo": str(page),
-        "numOfRows": "100",
-        "resultType": "json"
-    }
-    try:
-        res = requests.get(target_url, params=params, timeout=(10, 30))
-        if res.status_code != 200:
-            return None
+# 4. 단일 페이지 호출 함수 (Fallback URL 우회 탐색 내장)
+def fetch_single_page(clean_key, target_url, page, industry_name):
+    candidate_urls = FALLBACK_URL_MAP.get(industry_name, [target_url])
+    
+    for url in candidate_urls:
+        params = {
+            "serviceKey": clean_key,
+            "pageNo": str(page),
+            "numOfRows": "100",
+            "resultType": "json"
+        }
         try:
-            data = res.json()
-            items = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
-            if isinstance(items, dict):
-                items = [items]
-            if items:
-                return pd.DataFrame(items)
-        except Exception:
-            pass
+            res = requests.get(url, params=params, timeout=(10, 30))
+            if res.status_code == 200:
+                try:
+                    data = res.json()
+                    items = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+                    if isinstance(items, dict):
+                        items = [items]
+                    if items:
+                        return pd.DataFrame(items)
+                except Exception:
+                    pass
 
-        try:
-            root = ET.fromstring(res.text)
-            items_xml = root.findall(".//item")
-            if items_xml:
-                return pd.DataFrame([{c.tag: c.text for c in item} for item in items_xml])
+                try:
+                    root = ET.fromstring(res.text)
+                    items_xml = root.findall(".//item")
+                    if items_xml:
+                        return pd.DataFrame([{c.tag: c.text for c in item} for item in items_xml])
+                except Exception:
+                    pass
         except Exception:
-            pass
-    except Exception:
-        return None
+            continue
     return None
 
 # 5. 다중 페이지 수집 함수 (캐싱 적용)
@@ -109,7 +124,7 @@ def fetch_all_data(api_key, industry_name, total_pages):
     
     all_dfs = []
     for p in range(1, total_pages + 1):
-        pdf = fetch_single_page(clean_key, target_url, p)
+        pdf = fetch_single_page(clean_key, target_url, p, industry_name)
         if pdf is not None and not pdf.empty:
             all_dfs.append(pdf)
     
@@ -119,7 +134,7 @@ def fetch_all_data(api_key, industry_name, total_pages):
         if dup_col:
             combined = combined.drop_duplicates(subset=[dup_col])
         return combined, None
-    return None, "데이터 수신에 실패했습니다. API 키를 확인해주세요."
+    return None, f"'{industry_name}' 데이터 수신에 실패했습니다. API 활용신청 여부 및 인증키를 확인해주세요."
 
 # 6. 정밀 데이터 가공 및 지역 필터링
 def process_and_filter(df, sido, reg_name, code, active_only):
@@ -130,7 +145,7 @@ def process_and_filter(df, sido, reg_name, code, active_only):
     df["사업장명"] = df[name_col].astype(str).str.strip()
 
     # 인허가일자
-    date_col = norm.get("LCPMTYMD", norm.get("PRMISNDE", None))
+    date_col = norm.get("LCPMTYMD", norm.get("PRMISNDE", norm.get("APVPERMYMD", None)))
     if date_col:
         def fmt_d(v):
             if pd.isna(v) or str(v).strip() in ["", "None", "nan", "null", "-"]:
@@ -175,8 +190,8 @@ def process_and_filter(df, sido, reg_name, code, active_only):
         df["우편번호"] = "-"
     df["우편번호"] = df["우편번호"].fillna("-")
 
-    # 종업원(의료인)수
-    emp_col = norm.get("HCWKRCNT", None)
+    # 종업원수 (의료인 HCWKRCNT + 제조/폐기물 TOTEMPLYCNT / EMPLYCNT 교차 지원)
+    emp_col = norm.get("HCWKRCNT", norm.get("TOTEMPLYCNT", norm.get("EMPLYCNT", None)))
     df["종업원(의료인)수"] = pd.to_numeric(df[emp_col], errors="coerce").fillna(0).astype(int) if emp_col else 0
 
     # 전화번호
@@ -351,7 +366,7 @@ def generate_16_labels_html(df_target):
 # 8. 메인 화면 탭 구성
 tab1, tab2 = st.tabs(["📋 실시간 명부 & 라벨 출력", "📊 지역별 5대 업종 비교 분석"])
 
-# --- [TAB 1: 기존 명부 및 라벨 출력] ---
+# --- [TAB 1: 실시간 명부 & 라벨 출력] ---
 with tab1:
     if user_api_key:
         with st.spinner(f"'{selected_region_name}'의 '{selected_industry}' 데이터를 수집 중입니다..."):
@@ -363,12 +378,21 @@ with tab1:
             filtered_df = process_and_filter(raw_df, sido_choice, selected_region_name, target_code, only_active)
             filtered_df["영업상태"] = "접촉 전"
             
-            # 상단 요약 카드
+            # 상단 핵심 메트릭 (업종별 맞춤 전략 명시)
+            if selected_industry == "의원":
+                focus_target = "요양급여 결제계좌"
+            elif selected_industry == "식품제조가공업":
+                focus_target = "B2B 결제/대량 급여이체"
+            elif selected_industry == "건설폐기물처리업":
+                focus_target = "공사 기성금/법인MMDA"
+            else:
+                focus_target = "대량 급여이체 수수료 면제"
+                
             c1, c2, c3, c4 = st.columns(4)
             c1.metric(f"{selected_region_name} 발굴", f"{len(filtered_df)} 개소")
             tot_emp = filtered_df["종업원(의료인)수"].sum() if not filtered_df.empty else 0
             c2.metric("잠재 급여이체 대상", f"{tot_emp:,} 명")
-            c3.metric("중점 유치 대상", "대량 급여계좌" if selected_industry not in ["병원", "의원"] else "요양급여 계좌")
+            c3.metric("중점 유치 대상", focus_target)
             c4.metric("전국 스캔 모수", f"{len(raw_df):,} 건")
             
             st.divider()
@@ -430,7 +454,7 @@ with tab1:
 # --- [TAB 2: 지역별 5대 업종 비교 분석 차트] ---
 with tab2:
     st.subheader(f"📊 '{selected_region_name}' 5대 타깃 업종 모수 비교 분석")
-    st.caption("선택하신 관할 지역의 업종별 사업자 수와 근로자 규모를 실시간 집계하여 영업 우선순위를 제안합니다.")
+    st.caption("새롭게 개편된 부울경 5대 전략 업종(식품제조·건설폐기물·의원·건물위생·소독)의 사업자 수와 근로자 규모를 실시간 집계합니다.")
     
     if user_api_key:
         if st.button("🚀 5대 업종 분포 현황 집계 및 차트 생성", type="primary"):
@@ -449,8 +473,16 @@ with tab2:
                     cnt = 0
                     emp_cnt = 0
                 
-                # 주요 영업 공략 포인트
-                strategy = "요양급여 결제계좌 / MMDA" if ind_name in ["병원", "의원"] else "대량 급여이체 / 법인MMDA"
+                # 업종별 맞춤 전략 문구
+                if ind_name == "의원":
+                    strategy = "요양급여 결제계좌 / 100% 국가보장 MMDA"
+                elif ind_name == "식품제조가공업":
+                    strategy = "B2B 대금정산 / 대량 급여이체 / 법인MMDA"
+                elif ind_name == "건설폐기물처리업":
+                    strategy = "기성금 수령 / 고금리 법인MMDA"
+                else:
+                    strategy = "대량 급여이체 수수료 평생면제 / 법인MMDA"
+                    
                 industry_stats.append({
                     "업종": ind_name,
                     "사업체수": cnt,
@@ -474,9 +506,8 @@ with tab2:
             
             st.divider()
             
-            # 2. 업종별 사업체 수 시각화 차트
+            # 2. 시각화 차트
             col_chart1, col_chart2 = st.columns(2)
-            
             with col_chart1:
                 st.markdown("##### 🏢 업종별 사업체 수 (개소)")
                 chart_biz = df_stat.set_index("업종")[["사업체수"]]
@@ -489,7 +520,7 @@ with tab2:
                 
             st.divider()
             
-            # 3. 상세 비교 테이블
+            # 3. 상세 분석표
             st.markdown("##### 📋 5대 업종 순위 및 영업 타깃 분석표")
             display_stat = df_stat.rename(columns={
                 "업종": "타깃 업종",
@@ -499,13 +530,13 @@ with tab2:
             })
             st.dataframe(display_stat, hide_index=True, use_container_width=True)
             
-            # 4. 현장 영업 제언 카드
+            # 4. 현장 영업 가이드
             st.info(f"""
-            💡 **{selected_region_name} B2B 마케팅 전략 제언:**
-            * **최우선 공략 대상**: **'{top_ind}'** 업종이 관내 가장 많은 비중을 차지하므로 DM 발송 및 TM 인입 1순위로 추천합니다.
-            * **급여계좌 대량 유치**: 종업원 수가 많은 시설관리·소독업 및 병·의원을 중심으로 '급여이체 수수료 평생면제' 혜택을 전면에 내세워 법인과 근로자를 동시 유치하세요.
+            💡 **{selected_region_name} B2B 타깃 영업 전략:**
+            * **제조·물류 공단 권역**: **'식품제조가공업'**과 **'건설폐기물처리업'**은 원자재 매입·매출 및 공사 기성금 수령 규모가 커 법인 MMDA(파킹통장) 평잔 유치에 최적입니다.
+            * **도심·생활 밀접 권역**: **'의원'**과 **'건물위생관리업'**은 정기 급여이체 및 건보 요양급여 결제계좌 유치 효과가 큽니다.
             """)
         else:
-            st.info("👆 위 **[5대 업종 분포 현황 집계 및 차트 생성]** 버튼을 누르면 현재 선택된 관할 구역의 5대 업종 데이터를 일괄 스캔하여 비교 차트를 생성합니다.")
+            st.info("👆 위 **[5대 업종 분포 현황 집계 및 차트 생성]** 버튼을 누르면 관할 구역 내 개편된 5대 업종의 현황을 일괄 집계합니다.")
     else:
         st.info("👈 사이드바에 공공데이터 API 인증키를 입력하세요.")
