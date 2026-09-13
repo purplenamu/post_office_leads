@@ -49,7 +49,7 @@ REGION_HIERARCHY = {
     }
 }
 
-# 3. 사이드바 UI (보안 완벽 차단: 화면에 키 노출 절대 없음)
+# 3. 사이드바 UI (보안 완벽 차단: 서버 백엔드 자동 연동)
 default_key = ""
 try:
     if "PUBLIC_DATA_KEY" in st.secrets:
@@ -59,8 +59,6 @@ except Exception:
 
 with st.sidebar:
     st.header("🔑 API 및 타깃 관할 설정")
-    
-    # 화면에는 빈칸("")으로 두고, 플레이스홀더로만 안내
     custom_key = st.text_input(
         "개인 API 인증키 (선택사항)",
         value="",
@@ -68,8 +66,6 @@ with st.sidebar:
         placeholder="시스템 기본키 연동 중 (입력 불필요)",
         help="Secrets의 관리자 키가 서버에서 안전하게 자동 호출됩니다. 개인 키를 쓰실 분만 입력하세요."
     )
-    
-    # 사용자가 직접 입력한 키가 있으면 그것을 쓰고, 없으면 서버 Secrets 키를 내부 적용
     user_api_key = custom_key.strip() if custom_key.strip() else default_key
     
     selected_industry = st.selectbox("타깃 업종", list(API_URL_MAP.keys()), index=0)
@@ -436,7 +432,12 @@ with tab1:
                     lambda v: f"{v}명" if v > 0 else "신설 (미기재)"
                 )
                 
-                view_cols = ["인허가일자", "사업장명", "우편번호", "사업장소재지", "종업원수(표시)", "전화번호", "영업상태"]
+                # 네이버 지도 다이렉트 검색 링크 생성
+                display_table_df["네이버지도"] = display_table_df["사업장소재지"].apply(
+                    lambda addr: f"https://map.naver.com/p/search/{urllib.parse.quote(str(addr))}"
+                )
+                
+                view_cols = ["인허가일자", "사업장명", "우편번호", "사업장소재지", "네이버지도", "종업원수(표시)", "전화번호", "영업상태"]
                 st.subheader(f"📋 {selected_region_name} {selected_industry} 실시간 명부 ({len(filtered_df)}건 확보)")
                 
                 edited_df = st.data_editor(
@@ -444,6 +445,10 @@ with tab1:
                     column_config={
                         "인허가일자": st.column_config.TextColumn("개설(인허가)일자"),
                         "우편번호": st.column_config.TextColumn("우편번호"),
+                        "네이버지도": st.column_config.LinkColumn(
+                            "위치 확인",
+                            display_text="📍 지도보기"
+                        ),
                         "종업원수(표시)": st.column_config.TextColumn("종업원(근로자)수"),
                         "영업상태": st.column_config.SelectboxColumn(
                             "영업 단계",
@@ -451,7 +456,7 @@ with tab1:
                             required=True
                         )
                     },
-                    disabled=["인허가일자", "사업장명", "우편번호", "사업장소재지", "종업원수(표시)", "전화번호"],
+                    disabled=["인허가일자", "사업장명", "우편번호", "사업장소재지", "네이버지도", "종업원수(표시)", "전화번호"],
                     hide_index=True,
                     use_container_width=True
                 )
