@@ -7,10 +7,10 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 import re
 
-st.set_page_config(page_title="우체국 B2B 신규 법인 결제계좌 알리미", layout="wide")
+st.set_page_config(page_title="우체국 B2B 법인 결제계좌 알리미", layout="wide")
 
-st.title("📮 우체국 B2B 신규 법인 결제계좌 & 급여이체 알리미")
-st.caption("공공데이터 실시간 API 연동 (부울경 전역 16칸 우편 라벨지 출력 탑재)")
+st.title("📮 우체국 B2B 법인 결제계좌 & 급여이체 알리미")
+st.caption("공공데이터 실시간 API 연동 (부울경 전역 16칸 라벨지 & 5대 업종 분석 차트 탑재)")
 
 # 1. 5대 업종 API 엔드포인트
 API_URL_MAP = {
@@ -53,7 +53,7 @@ REGION_HIERARCHY = {
 with st.sidebar:
     st.header("🔑 API 및 타깃 관할 설정")
     user_api_key = st.text_input("공공데이터 API 인증키", type="password")
-    selected_industry = st.selectbox("타깃 업종", list(API_URL_MAP.keys()), index=0)
+    selected_industry = st.selectbox("타깃 업종 (명부 조회용)", list(API_URL_MAP.keys()), index=0)
     
     sido_choice = st.selectbox("광역 시·도 선택", list(REGION_HIERARCHY.keys()), index=0)
     selected_region_name = st.selectbox("관할 시·군·구 선택", list(REGION_HIERARCHY[sido_choice].keys()), index=0)
@@ -108,13 +108,10 @@ def fetch_all_data(api_key, industry_name, total_pages):
     target_url = API_URL_MAP[industry_name]
     
     all_dfs = []
-    pbar = st.progress(0, text="공공데이터 서버에서 전국 최신 데이터 수집 중...")
     for p in range(1, total_pages + 1):
-        pbar.progress(p / total_pages, text=f"전국 데이터 {p}/{total_pages} 페이지 수집 중...")
         pdf = fetch_single_page(clean_key, target_url, p)
         if pdf is not None and not pdf.empty:
             all_dfs.append(pdf)
-    pbar.empty()
     
     if all_dfs:
         combined = pd.concat(all_dfs, ignore_index=True)
@@ -335,7 +332,6 @@ def generate_16_labels_html(df_target):
         html += '<div class="page">\n'
         for item in chunk:
             raw_zip = str(item.get('우편번호', ''))
-            # 우편번호는 숫자만 추출
             clean_zip = re.sub(r'[^0-9]', '', raw_zip)
             addr_val = item.get('사업장소재지', '-')
             comp_val = item.get('사업장명', '-')
@@ -352,81 +348,164 @@ def generate_16_labels_html(df_target):
     html += "</body></html>"
     return html
 
-# 8. 메인 화면 표출부
-if user_api_key:
-    raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, scan_pages)
-    
-    if err_msg:
-        st.error(err_msg)
-    elif raw_df is not None and not raw_df.empty:
-        filtered_df = process_and_filter(raw_df, sido_choice, selected_region_name, target_code, only_active)
-        filtered_df["영업상태"] = "접촉 전"
+# 8. 메인 화면 탭 구성
+tab1, tab2 = st.tabs(["📋 실시간 명부 & 라벨 출력", "📊 지역별 5대 업종 비교 분석"])
+
+# --- [TAB 1: 기존 명부 및 라벨 출력] ---
+with tab1:
+    if user_api_key:
+        with st.spinner(f"'{selected_region_name}'의 '{selected_industry}' 데이터를 수집 중입니다..."):
+            raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, scan_pages)
         
-        # 상단 요약 카드
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric(f"{selected_region_name} 발굴", f"{len(filtered_df)} 개소")
-        tot_emp = filtered_df["종업원(의료인)수"].sum() if not filtered_df.empty else 0
-        c2.metric("잠재 급여이체 대상", f"{tot_emp:,} 명")
-        c3.metric("중점 유치 대상", "대량 급여계좌" if selected_industry not in ["병원", "의원"] else "요양급여 계좌")
-        c4.metric("전국 스캔 모수", f"{len(raw_df):,} 건")
-        
-        st.divider()
-        
-        # 데이터 테이블
-        if not filtered_df.empty:
-            view_cols = ["인허가일자", "사업장명", "우편번호", "사업장소재지", "종업원(의료인)수", "전화번호", "영업상태"]
-            st.subheader(f"📋 {selected_region_name} {selected_industry} 실시간 명부 ({len(filtered_df)}건 확보)")
+        if err_msg:
+            st.error(err_msg)
+        elif raw_df is not None and not raw_df.empty:
+            filtered_df = process_and_filter(raw_df, sido_choice, selected_region_name, target_code, only_active)
+            filtered_df["영업상태"] = "접촉 전"
             
-            edited_df = st.data_editor(
-                filtered_df[view_cols],
-                column_config={
-                    "인허가일자": st.column_config.TextColumn("개설(인허가)일자"),
-                    "우편번호": st.column_config.TextColumn("우편번호"),
-                    "종업원(의료인)수": st.column_config.NumberColumn("종업원(의료인)수", format="%d명"),
-                    "영업상태": st.column_config.SelectboxColumn(
-                        "영업 단계",
-                        options=["접촉 전", "전화(TM) 완료", "방문 예정", "상담 진행중", "계좌 개설 완료", "보류"],
-                        required=True
-                    )
-                },
-                disabled=["인허가일자", "사업장명", "우편번호", "사업장소재지", "종업원(의료인)수", "전화번호"],
-                hide_index=True,
-                use_container_width=True
-            )
+            # 상단 요약 카드
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric(f"{selected_region_name} 발굴", f"{len(filtered_df)} 개소")
+            tot_emp = filtered_df["종업원(의료인)수"].sum() if not filtered_df.empty else 0
+            c2.metric("잠재 급여이체 대상", f"{tot_emp:,} 명")
+            c3.metric("중점 유치 대상", "대량 급여계좌" if selected_industry not in ["병원", "의원"] else "요양급여 계좌")
+            c4.metric("전국 스캔 모수", f"{len(raw_df):,} 건")
             
             st.divider()
-
-            # 16칸 주소 라벨지 생성 (접촉 전 업체 대상)
-            pre_contact_df = edited_df[edited_df["영업상태"] == "접촉 전"]
             
-            st.subheader("🖨️ 16칸 DM 주소 라벨 인쇄 (접촉 전 업체 대상)")
-            
-            if not pre_contact_df.empty:
-                req_pages = (len(pre_contact_df) + 15) // 16
-                m1, m2, m3 = st.columns(3)
-                m1.metric("라벨 출력 대상", f"{len(pre_contact_df)} 건")
-                m2.metric("필요 16칸 라벨지(A4)", f"{req_pages} 장")
-                m3.metric("규격 호환", "폼텍 3107 / 2열 8행")
+            if not filtered_df.empty:
+                view_cols = ["인허가일자", "사업장명", "우편번호", "사업장소재지", "종업원(의료인)수", "전화번호", "영업상태"]
+                st.subheader(f"📋 {selected_region_name} {selected_industry} 실시간 명부 ({len(filtered_df)}건 확보)")
                 
-                label_html_content = generate_16_labels_html(pre_contact_df)
-                
-                st.download_button(
-                    label=f"📄 {selected_region_name} '접촉 전' 16칸 주소라벨 파일(HTML) 다운로드 / 인쇄",
-                    data=label_html_content,
-                    file_name=f"우체국_16주소라벨_{selected_region_name}_{datetime.date.today()}.html",
-                    mime="text/html"
+                edited_df = st.data_editor(
+                    filtered_df[view_cols],
+                    column_config={
+                        "인허가일자": st.column_config.TextColumn("개설(인허가)일자"),
+                        "우편번호": st.column_config.TextColumn("우편번호"),
+                        "종업원(의료인)수": st.column_config.NumberColumn("종업원(의료인)수", format="%d명"),
+                        "영업상태": st.column_config.SelectboxColumn(
+                            "영업 단계",
+                            options=["접촉 전", "전화(TM) 완료", "방문 예정", "상담 진행중", "계좌 개설 완료", "보류"],
+                            required=True
+                        )
+                    },
+                    disabled=["인허가일자", "사업장명", "우편번호", "사업장소재지", "종업원(의료인)수", "전화번호"],
+                    hide_index=True,
+                    use_container_width=True
                 )
                 
-                st.caption("💡 **인쇄 요령:** 다운로드한 HTML 파일을 열고 상단 **[16칸 라벨지 바로 인쇄]** 버튼을 누르세요. 인쇄 설정에서 **'여백: 없음'**, **'배율: 100%'**로 설정하시면 라벨 칸에 맞게 출력됩니다.")
+                st.divider()
+
+                # 16칸 주소 라벨지 생성
+                pre_contact_df = edited_df[edited_df["영업상태"] == "접촉 전"]
+                st.subheader("🖨️ 16칸 DM 주소 라벨 인쇄 (접촉 전 업체 대상)")
                 
-                with st.expander("👀 16칸 라벨 인쇄 화면 미리보기"):
-                    components.html(label_html_content, height=450, scrolling=True)
+                if not pre_contact_df.empty:
+                    req_pages = (len(pre_contact_df) + 15) // 16
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("라벨 출력 대상", f"{len(pre_contact_df)} 건")
+                    m2.metric("필요 16칸 라벨지(A4)", f"{req_pages} 장")
+                    m3.metric("규격 호환", "폼텍 3107 / 2열 8행")
+                    
+                    label_html_content = generate_16_labels_html(pre_contact_df)
+                    
+                    st.download_button(
+                        label=f"📄 {selected_region_name} '접촉 전' 16칸 주소라벨 파일(HTML) 다운로드 / 인쇄",
+                        data=label_html_content,
+                        file_name=f"우체국_16주소라벨_{selected_region_name}_{datetime.date.today()}.html",
+                        mime="text/html"
+                    )
+                    
+                    with st.expander("👀 16칸 라벨 인쇄 화면 미리보기"):
+                        components.html(label_html_content, height=450, scrolling=True)
+                else:
+                    st.info("현재 모든 업체의 진행 단계가 변경되어 '접촉 전' 상태인 업체가 없습니다.")
             else:
-                st.info("현재 모든 업체의 진행 단계가 변경되어 '접촉 전' 상태인 업체가 없습니다.")
-                
+                st.warning(f"전국 최신 {len(raw_df):,}건 중 '{selected_region_name}' 소재 {selected_industry} 사업장이 없습니다.")
         else:
-            st.warning(f"전국 최신 {len(raw_df):,}건 중 '{selected_region_name}' 소재 {selected_industry} 사업장이 없습니다.")
+            st.warning("데이터를 가져오지 못했습니다.")
     else:
-        st.warning("데이터를 가져오지 못했습니다.")
-else:
-    st.info("👈 사이드바에 공공데이터 API 인증키를 입력하세요.")
+        st.info("👈 사이드바에 공공데이터 API 인증키를 입력하세요.")
+
+# --- [TAB 2: 지역별 5대 업종 비교 분석 차트] ---
+with tab2:
+    st.subheader(f"📊 '{selected_region_name}' 5대 타깃 업종 모수 비교 분석")
+    st.caption("선택하신 관할 지역의 업종별 사업자 수와 근로자 규모를 실시간 집계하여 영업 우선순위를 제안합니다.")
+    
+    if user_api_key:
+        if st.button("🚀 5대 업종 분포 현황 집계 및 차트 생성", type="primary"):
+            industry_stats = []
+            progress_bar = st.progress(0, text="5대 업종 데이터 통합 분석 중...")
+            
+            industries = list(API_URL_MAP.keys())
+            for idx, ind_name in enumerate(industries):
+                progress_bar.progress((idx + 1) / len(industries), text=f"'{ind_name}' 데이터 수집 및 분석 중 ({idx+1}/{len(industries)})...")
+                raw_ind, _ = fetch_all_data(user_api_key, ind_name, scan_pages)
+                if raw_ind is not None and not raw_ind.empty:
+                    f_df = process_and_filter(raw_ind, sido_choice, selected_region_name, target_code, only_active)
+                    cnt = len(f_df)
+                    emp_cnt = f_df["종업원(의료인)수"].sum() if not f_df.empty else 0
+                else:
+                    cnt = 0
+                    emp_cnt = 0
+                
+                # 주요 영업 공략 포인트
+                strategy = "요양급여 결제계좌 / MMDA" if ind_name in ["병원", "의원"] else "대량 급여이체 / 법인MMDA"
+                industry_stats.append({
+                    "업종": ind_name,
+                    "사업체수": cnt,
+                    "종업원수": emp_cnt,
+                    "추천전략": strategy
+                })
+            
+            progress_bar.empty()
+            
+            df_stat = pd.DataFrame(industry_stats).sort_values(by="사업체수", ascending=False)
+            
+            # 1. 종합 메트릭
+            top_ind = df_stat.iloc[0]["업종"] if not df_stat.empty and df_stat.iloc[0]["사업체수"] > 0 else "-"
+            total_biz = df_stat["사업체수"].sum()
+            total_emp_all = df_stat["종업원수"].sum()
+            
+            sc1, sc2, sc3 = st.columns(3)
+            sc1.metric(f"{selected_region_name} 최다 업종 (1위)", top_ind)
+            sc2.metric("5대 업종 총 사업체수", f"{total_biz:,} 개소")
+            sc3.metric("잠재 총 종사자수", f"{total_emp_all:,} 명")
+            
+            st.divider()
+            
+            # 2. 업종별 사업체 수 시각화 차트
+            col_chart1, col_chart2 = st.columns(2)
+            
+            with col_chart1:
+                st.markdown("##### 🏢 업종별 사업체 수 (개소)")
+                chart_biz = df_stat.set_index("업종")[["사업체수"]]
+                st.bar_chart(chart_biz, color="#0b5394")
+                
+            with col_chart2:
+                st.markdown("##### 👥 업종별 잠재 종업원 규모 (명)")
+                chart_emp = df_stat.set_index("업종")[["종업원수"]]
+                st.bar_chart(chart_emp, color="#d32f2f")
+                
+            st.divider()
+            
+            # 3. 상세 비교 테이블
+            st.markdown("##### 📋 5대 업종 순위 및 영업 타깃 분석표")
+            display_stat = df_stat.rename(columns={
+                "업종": "타깃 업종",
+                "사업체수": "발굴 사업체 수(개소)",
+                "종업원수": "총 종업원 수(명)",
+                "추천전략": "중점 유치 상품"
+            })
+            st.dataframe(display_stat, hide_index=True, use_container_width=True)
+            
+            # 4. 현장 영업 제언 카드
+            st.info(f"""
+            💡 **{selected_region_name} B2B 마케팅 전략 제언:**
+            * **최우선 공략 대상**: **'{top_ind}'** 업종이 관내 가장 많은 비중을 차지하므로 DM 발송 및 TM 인입 1순위로 추천합니다.
+            * **급여계좌 대량 유치**: 종업원 수가 많은 시설관리·소독업 및 병·의원을 중심으로 '급여이체 수수료 평생면제' 혜택을 전면에 내세워 법인과 근로자를 동시 유치하세요.
+            """)
+        else:
+            st.info("👆 위 **[5대 업종 분포 현황 집계 및 차트 생성]** 버튼을 누르면 현재 선택된 관할 구역의 5대 업종 데이터를 일괄 스캔하여 비교 차트를 생성합니다.")
+    else:
+        st.info("👈 사이드바에 공공데이터 API 인증키를 입력하세요.")
