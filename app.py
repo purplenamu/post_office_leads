@@ -7,7 +7,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 import re
 
-st.set_page_config(page_title="우체국 B2B 법인 결제계좌 알리미", layout="wide")
+st.set_page_config(page_title="우체국 B2B 신규 법인 결제계좌 알리미", layout="wide")
 
 st.title("📮 우체국 B2B 법인 결제계좌 & 급여이체 알리미")
 st.caption("공공데이터 실시간 API 연동 (부울경 전역 16칸 우편 라벨지 출력 탑재)")
@@ -162,7 +162,7 @@ def process_and_filter(df, sido, reg_name, code, active_only):
         df["사업장소재지"] = "주소 확인 필요"
     df["사업장소재지"] = df["사업장소재지"].fillna("주소 확인 필요")
 
-    # 우편번호 (도로명/지번 우편번호 통합)
+    # 우편번호
     zr_col = norm.get("ROADNMZIP", None)
     zl_col = norm.get("LCTNZIP", None)
     s_zr = df[zr_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if zr_col else None
@@ -289,30 +289,35 @@ def generate_16_labels_html(df_target):
   .label-box {
     width: 99.1mm;
     height: 34mm;
-    padding: 3.5mm 6mm;
+    padding: 4mm 6mm 3mm 6mm;
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    justify-content: space-between;
     overflow: hidden;
     line-height: 1.35;
   }
-  .zipcode {
+  .address-line {
     font-size: 11px;
-    font-weight: bold;
-    color: #0b5394;
-    letter-spacing: 1px;
-    margin-bottom: 2px;
-  }
-  .address {
-    font-size: 10.5px;
     color: #212529;
     word-break: keep-all;
-    margin-bottom: 3px;
   }
-  .company {
-    font-size: 12.5px;
+  .recipient-tag {
     font-weight: bold;
     color: #000000;
+    margin-right: 4px;
+  }
+  .company-line {
+    font-size: 13px;
+    font-weight: bold;
+    color: #000000;
+    margin-top: 2px;
+  }
+  .zipcode-line {
+    font-size: 13px;
+    font-weight: bold;
+    color: #000000;
+    letter-spacing: 2px;
+    text-align: right;
   }
 </style>
 </head>
@@ -329,15 +334,17 @@ def generate_16_labels_html(df_target):
         chunk = records[i:i+16]
         html += '<div class="page">\n'
         for item in chunk:
-            zip_val = item.get('우편번호', '-')
+            raw_zip = str(item.get('우편번호', ''))
+            # 우편번호는 숫자만 추출
+            clean_zip = re.sub(r'[^0-9]', '', raw_zip)
             addr_val = item.get('사업장소재지', '-')
             comp_val = item.get('사업장명', '-')
+            
             html += f"""  <div class="label-box">
-    <div class="zipcode">[{zip_val}]</div>
-    <div class="address">{addr_val}</div>
-    <div class="company">{comp_val} <span style="font-weight: normal; font-size: 11px; color: #495057;">대표님 귀하</span></div>
+    <div class="address-line"><span class="recipient-tag">받는사람</span> {addr_val}</div>
+    <div class="company-line">{comp_val} <span style="font-weight: normal; font-size: 11px; color: #495057;">대표님 귀하</span></div>
+    <div class="zipcode-line">{clean_zip}</div>
   </div>\n"""
-        # 16칸 그리드 틀 유지를 위한 빈칸 패딩
         for _ in range(16 - len(chunk)):
             html += '  <div class="label-box"></div>\n'
         html += '</div>\n'
@@ -365,7 +372,7 @@ if user_api_key:
         
         st.divider()
         
-        # 데이터 에디터 (추천 우체국 상품 삭제, 우편번호 추가)
+        # 데이터 테이블
         if not filtered_df.empty:
             view_cols = ["인허가일자", "사업장명", "우편번호", "사업장소재지", "종업원(의료인)수", "전화번호", "영업상태"]
             st.subheader(f"📋 {selected_region_name} {selected_industry} 실시간 명부 ({len(filtered_df)}건 확보)")
@@ -389,7 +396,7 @@ if user_api_key:
             
             st.divider()
 
-            # --- 16칸 주소 라벨지 생성 섹션 (접촉 전 업체 전용) ---
+            # 16칸 주소 라벨지 생성 (접촉 전 업체 대상)
             pre_contact_df = edited_df[edited_df["영업상태"] == "접촉 전"]
             
             st.subheader("🖨️ 16칸 DM 주소 라벨 인쇄 (접촉 전 업체 대상)")
@@ -403,7 +410,6 @@ if user_api_key:
                 
                 label_html_content = generate_16_labels_html(pre_contact_df)
                 
-                # 라벨 인쇄용 파일 다운로드 버튼
                 st.download_button(
                     label=f"📄 {selected_region_name} '접촉 전' 16칸 주소라벨 파일(HTML) 다운로드 / 인쇄",
                     data=label_html_content,
@@ -411,7 +417,7 @@ if user_api_key:
                     mime="text/html"
                 )
                 
-                st.caption("💡 **인쇄 요령:** 다운로드한 HTML 파일을 열고 상단 **[16칸 라벨지 바로 인쇄]** 버튼을 누르세요. 인쇄 창에서 **'여백: 없음'**, **'배율: 100%'**로 설정하시면 16칸 라벨지에 오차 없이 출력됩니다.")
+                st.caption("💡 **인쇄 요령:** 다운로드한 HTML 파일을 열고 상단 **[16칸 라벨지 바로 인쇄]** 버튼을 누르세요. 인쇄 설정에서 **'여백: 없음'**, **'배율: 100%'**로 설정하시면 라벨 칸에 맞게 출력됩니다.")
                 
                 with st.expander("👀 16칸 라벨 인쇄 화면 미리보기"):
                     components.html(label_html_content, height=450, scrolling=True)
