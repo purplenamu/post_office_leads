@@ -404,10 +404,17 @@ with tab1:
                     lambda v: f"{v}명" if v > 0 else "신설 (미기재)"
                 )
                 
-                # 네이버 지도 검색 링크
-                display_table_df["네이버지도"] = display_table_df["사업장소재지"].apply(
-                    lambda addr: f"https://map.naver.com/p/search/{urllib.parse.quote(str(addr))}"
-                )
+                # 네이버 지도 검색 링크: 사업장명과 주소를 함께 결합하여 플레이스 정보 우선 호출
+                def make_naver_map_url(row):
+                    name = str(row.get("사업장명", "")).strip()
+                    addr = str(row.get("사업장소재지", "")).strip()
+                    if addr and addr != "주소 확인 필요":
+                        query = f"{name} {addr}"
+                    else:
+                        query = name
+                    return f"https://map.naver.com/p/search/{urllib.parse.quote(query)}"
+
+                display_table_df["네이버지도"] = display_table_df.apply(make_naver_map_url, axis=1)
                 
                 view_cols = ["인허가일자", "사업장명", "우편번호", "사업장소재지", "네이버지도", "종업원수(표시)", "전화번호", "영업상태"]
                 st.subheader(f"📋 {selected_region_name} {selected_industry} 실시간 명부 ({len(filtered_df)}건 확보)")
