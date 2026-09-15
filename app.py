@@ -404,19 +404,25 @@ with tab1:
                     lambda v: f"{v}명" if v > 0 else "신설 (미기재)"
                 )
                 
-                # 네이버 지도 검색 링크: 사업장명과 주소를 함께 결합하여 플레이스 정보 우선 호출
-                def make_naver_map_url(row):
-                    name = str(row.get("사업장명", "")).strip()
-                    addr = str(row.get("사업장소재지", "")).strip()
-                    if addr and addr != "주소 확인 필요":
-                        query = f"{name} {addr}"
-                    else:
-                        query = name
+                # 1) 업체정보 검색 URL: 정제된 상호명 + 시군구 (플레이스 프로필 우선 조회)
+                def make_corp_search_url(row):
+                    raw_name = str(row.get("사업장명", "")).strip()
+                    clean_name = re.sub(r"\(주\)|\(유\)|주식회사|유한회사|\s+", " ", raw_name).strip()
+                    dist = selected_region_name.split(" ")[-1]
+                    query = f"{dist} {clean_name}"
                     return f"https://map.naver.com/p/search/{urllib.parse.quote(query)}"
 
-                display_table_df["네이버지도"] = display_table_df.apply(make_naver_map_url, axis=1)
+                # 2) 현장위치 검색 URL: 쉼표/층수/괄호 완벽 제거한 순수 도로명주소 (건물 및 로드뷰 100% 보장)
+                def make_addr_search_url(row):
+                    raw_addr = str(row.get("사업장소재지", "")).strip()
+                    clean_addr = re.sub(r",.*$", "", raw_addr)
+                    clean_addr = re.sub(r"\(.*?\)", "", clean_addr).strip()
+                    return f"https://map.naver.com/p/search/{urllib.parse.quote(clean_addr)}"
+
+                display_table_df["업체정보"] = display_table_df.apply(make_corp_search_url, axis=1)
+                display_table_df["현장위치"] = display_table_df.apply(make_addr_search_url, axis=1)
                 
-                view_cols = ["인허가일자", "사업장명", "우편번호", "사업장소재지", "네이버지도", "종업원수(표시)", "전화번호", "영업상태"]
+                view_cols = ["인허가일자", "사업장명", "우편번호", "사업장소재지", "업체정보", "현장위치", "종업원수(표시)", "전화번호", "영업상태"]
                 st.subheader(f"📋 {selected_region_name} {selected_industry} 실시간 명부 ({len(filtered_df)}건 확보)")
                 
                 edited_df = st.data_editor(
@@ -424,7 +430,8 @@ with tab1:
                     column_config={
                         "인허가일자": st.column_config.TextColumn("개설(인허가)일자"),
                         "우편번호": st.column_config.TextColumn("우편번호"),
-                        "네이버지도": st.column_config.LinkColumn("위치 확인", display_text="📍 지도보기"),
+                        "업체정보": st.column_config.LinkColumn("플레이스 조회", display_text="🏢 업체정보"),
+                        "현장위치": st.column_config.LinkColumn("위치/로드뷰", display_text="📍 건물위치"),
                         "종업원수(표시)": st.column_config.TextColumn("종업원(근로자)수"),
                         "영업상태": st.column_config.SelectboxColumn(
                             "영업 단계",
@@ -432,7 +439,7 @@ with tab1:
                             required=True
                         )
                     },
-                    disabled=["인허가일자", "사업장명", "우편번호", "사업장소재지", "네이버지도", "종업원수(표시)", "전화번호"],
+                    disabled=["인허가일자", "사업장명", "우편번호", "사업장소재지", "업체정보", "현장위치", "종업원수(표시)", "전화번호"],
                     hide_index=True,
                     use_container_width=True
                 )
@@ -459,7 +466,7 @@ with tab1:
                     if corp_info:
                         st.success(f"✅ 금융위원회 공시 법인 확인: **{corp_info.get('corpNm', target_corp_query)}**")
                         
-                        # 1단 핵심 메트릭: 대표자명, 종업원수, 주거래은행, 1인평균급여
+                        # 1단 핵심 메트릭
                         ci1, ci2, ci3, ci4 = st.columns(4)
                         ci1.metric("대표자 성명", corp_info.get("enpRprFnm", "미등재"))
                         ci2.metric("공시 종업원수", f"{corp_info.get('enpEmpeCnt', '0')} 명")
