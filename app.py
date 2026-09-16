@@ -6,11 +6,12 @@ import datetime
 import urllib.parse
 import xml.etree.ElementTree as ET
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 st.set_page_config(page_title="우체국 B2B 법인 결제계좌 알리미", layout="wide")
 
 st.title("📮 우체국 B2B 법인 결제계좌 & 급여이체 알리미")
-st.caption("공공데이터 실시간 API + 금융위원회 기업기본정보 공식 연동 시스템")
+st.caption("공공데이터 실시간 API + 금융위원회 기업기본정보 공식 연동 시스템 (병렬 고속 수집 엔진 탑재)")
 
 # 1. 공식 승인 5대 전략 업종 엔드포인트
 API_URL_MAP = {
@@ -86,7 +87,7 @@ with st.sidebar:
         min_value=5,
         max_value=30,
         value=15,
-        help="15페이지는 전국 최신 1,500건, 30페이지는 3,000건을 1페이지부터 연속 수집합니다."
+        help="15페이지는 전국 최신 1,500건, 30페이지는 3,000건을 병렬로 초고속 동시 수집합니다."
     )
 
 # 4. 단일 페이지 호출 함수
@@ -98,7 +99,7 @@ def fetch_single_page(clean_key, target_url, page):
         "resultType": "json"
     }
     try:
-        res = requests.get(target_url, params=params, timeout=(10, 30))
+        res = requests.get(target_url, params=params, timeout=(10, 20))
         if res.status_code != 200:
             return None
         try:
@@ -122,7 +123,7 @@ def fetch_single_page(clean_key, target_url, page):
         return None
     return None
 
-# 5. 다중 페이지 수집 함수
+# 5. 다중 페이지 병렬 동시 수집 함수 (멀티스레딩 적용)
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_all_data(api_key, industry_name, total_pages):
     if not api_key:
@@ -132,12 +133,27 @@ def fetch_all_data(api_key, industry_name, total_pages):
     target_url = API_URL_MAP[industry_name]
     
     all_dfs = []
-    pbar = st.progress(0, text=f"전국 최신 데이터 자동 수집 중 (1 ~ {total_pages} 페이지)...")
-    for p in range(1, total_pages + 1):
-        pbar.progress(p / total_pages, text=f"전국 데이터 수집 중 ({p}/{total_pages} 페이지)...")
-        pdf = fetch_single_page(clean_key, target_url, p)
-        if pdf is not None and not pdf.empty:
-            all_dfs.append(pdf)
+    pbar = st.progress(0, text=f"'{industry_name}' 데이터 병렬 동시 수집 중 (총 {total_pages}장)...")
+    
+    # 최대 15개 스레드로 여러 페이지를 동시 호출
+    max_workers = min(total_pages, 15)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_page = {
+            executor.submit(fetch_single_page, clean_key, target_url, page): page
+            for page in range(1, total_pages + 1)
+        }
+        
+        completed_count = 0
+        for future in as_completed(future_to_page):
+            completed_count += 1
+            pbar.progress(completed_count / total_pages, text=f"초고속 병렬 수집 중 ({completed_count}/{total_pages} 완료)...")
+            try:
+                pdf = future.result()
+                if pdf is not None and not pdf.empty:
+                    all_dfs.append(pdf)
+            except Exception:
+                pass
+                
     pbar.empty()
     
     if all_dfs:
@@ -365,7 +381,7 @@ tab1, tab2 = st.tabs(["📋 실시간 명부 & 라벨 출력", "📊 지역별 5
 # --- [TAB 1: 실시간 명부 & 라벨 출력] ---
 with tab1:
     if user_api_key:
-        with st.spinner(f"'{selected_region_name}'의 '{selected_industry}' 데이터를 수집 중입니다..."):
+        with st.spinner(f"'{selected_region_name}'의 '{selected_industry}' 데이터를 고속 병렬 수집 중입니다..."):
             raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, scan_pages)
         
         if err_msg:
@@ -394,7 +410,7 @@ with tab1:
                 
             c2.metric("잠재 급여이체 대상", emp_display)
             c3.metric("중점 유치 대상", focus_target)
-            c4.metric("전국 스캔 모수", f"{len(raw_df):,} 건")
+            c4.metric("전국 병렬 스캔 모수", f"{len(raw_df):,} 건")
             
             st.divider()
             
@@ -412,7 +428,7 @@ with tab1:
                     query = f"{dist} {clean_name}"
                     return f"https://map.naver.com/p/search/{urllib.parse.quote(query)}"
 
-                # 2) 현장위치 검색 URL: 쉼표/층수/괄호 완벽 제거한 순수 도로명주소 (건물 및 로드뷰 100% 보장)
+                # 2) 현장위치 검색 URL: 쉼표/층수/괄호 제거한 순수 도로명주소
                 def make_addr_search_url(row):
                     raw_addr = str(row.get("사업장소재지", "")).strip()
                     clean_addr = re.sub(r",.*$", "", raw_addr)
