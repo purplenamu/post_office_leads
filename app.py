@@ -8,10 +8,10 @@ import xml.etree.ElementTree as ET
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-st.set_page_config(page_title="우체국 B2B 법인 결제계좌 알리미", layout="wide")
+st.set_page_config(page_title="우체국 B2B & 소상공인 마케팅 알리미", layout="wide")
 
-st.title("📮 우체국 B2B 법인 결제계좌 & 급여이체 알리미")
-st.caption("공공데이터 실시간 API + 금융위원회 기업기본정보 공식 연동 시스템 (병렬 고속 수집 엔진 탑재)")
+st.title("📮 우체국 B2B 법인 & 신규 소상공인 마케팅 알리미")
+st.caption("공공데이터 실시간 API + 금융위원회 기업기본정보 공식 연동 (병렬 고속 수집 엔진)")
 
 # 1. 공식 승인 5대 전략 업종 엔드포인트
 API_URL_MAP = {
@@ -53,7 +53,7 @@ REGION_HIERARCHY = {
     }
 }
 
-# 3. 사이드바 UI (Secrets 연동 및 보안 유지)
+# 3. 사이드바 UI
 default_key = ""
 try:
     if "PUBLIC_DATA_KEY" in st.secrets:
@@ -87,7 +87,7 @@ with st.sidebar:
         min_value=5,
         max_value=30,
         value=15,
-        help="15페이지는 전국 최신 1,500건, 30페이지는 3,000건을 병렬로 초고속 동시 수집합니다."
+        help="15페이지는 전국 최신 1,500건, 30페이지는 3,000건을 병렬로 고속 수집합니다."
     )
 
 # 4. 단일 페이지 호출 함수
@@ -123,26 +123,24 @@ def fetch_single_page(clean_key, target_url, page):
         return None
     return None
 
-# 5. 다중 페이지 병렬 동시 수집 함수 (멀티스레딩 적용)
+# 5. 다중 페이지 병렬 동시 수집 함수
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_all_data(api_key, industry_name, total_pages):
     if not api_key:
-        return None, "인증키가 감지되지 않았습니다. 사이드바에 키를 입력하거나 Streamlit Secrets를 확인해주세요."
+        return None, "인증키가 감지되지 않았습니다. Streamlit Secrets를 확인해주세요."
     
     clean_key = urllib.parse.unquote(api_key.strip())
     target_url = API_URL_MAP[industry_name]
     
     all_dfs = []
-    pbar = st.progress(0, text=f"'{industry_name}' 데이터 병렬 동시 수집 중 (총 {total_pages}장)...")
+    pbar = st.progress(0, text=f"'{industry_name}' 데이터 병렬 수집 중 (총 {total_pages}장)...")
     
-    # 최대 15개 스레드로 여러 페이지를 동시 호출
     max_workers = min(total_pages, 15)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_page = {
             executor.submit(fetch_single_page, clean_key, target_url, page): page
             for page in range(1, total_pages + 1)
         }
-        
         completed_count = 0
         for future in as_completed(future_to_page):
             completed_count += 1
@@ -162,7 +160,7 @@ def fetch_all_data(api_key, industry_name, total_pages):
         if dup_col:
             combined = combined.drop_duplicates(subset=[dup_col])
         return combined, None
-    return None, f"'{industry_name}' 데이터 수신에 실패했습니다. 키 권한 또는 포털 상태를 확인해주세요."
+    return None, f"'{industry_name}' 데이터 수신에 실패했습니다."
 
 # 6. 금융위원회 기업기본정보 단건 조회 함수
 @st.cache_data(ttl=86400, show_spinner=False)
@@ -203,13 +201,21 @@ def search_corp_outline(api_key, query_name):
             continue
     return None
 
-# 7. 정밀 데이터 가공 및 지역 필터링
+# 7. 데이터 정밀 가공 (법인 vs 소상공인 자동 분류)
 def process_and_filter(df, sido, reg_name, code, active_only):
     norm = {str(c).upper().replace("_", ""): c for c in df.columns}
     
     name_col = norm.get("BPLCNM", df.columns[0])
     df["사업장명"] = df[name_col].astype(str).str.strip()
 
+    # 법인 vs 소상공인(개인) 자동 판별
+    def classify_biz(name):
+        if re.search(r"\(주\)|주식회사|\(유\)|유한회사|\(합\)|합자회사|합명회사|사단법인|재단법인|의료법인", str(name)):
+            return "법인"
+        return "소상공인(개인)"
+    df["사업자구분"] = df["사업장명"].apply(classify_biz)
+
+    # 인허가일자
     date_col = norm.get("LCPMTYMD", norm.get("PRMISNDE", norm.get("APVPERMYMD", None)))
     if date_col:
         def fmt_d(v):
@@ -223,6 +229,7 @@ def process_and_filter(df, sido, reg_name, code, active_only):
     else:
         df["인허가일자"] = "-"
 
+    # 주소
     r_col = norm.get("ROADNMADDR", None)
     l_col = norm.get("LOTNOADDR", None)
     s_road = df[r_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if r_col else None
@@ -238,6 +245,7 @@ def process_and_filter(df, sido, reg_name, code, active_only):
         df["사업장소재지"] = "주소 확인 필요"
     df["사업장소재지"] = df["사업장소재지"].fillna("주소 확인 필요")
 
+    # 우편번호
     zr_col = norm.get("ROADNMZIP", None)
     zl_col = norm.get("LCTNZIP", None)
     s_zr = df[zr_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if zr_col else None
@@ -253,6 +261,7 @@ def process_and_filter(df, sido, reg_name, code, active_only):
         df["우편번호"] = "-"
     df["우편번호"] = df["우편번호"].fillna("-")
 
+    # 종업원수 집계
     def extract_emp(row):
         tot_keys = ["TOTEPNUM", "HCWKRCNT", "TOTEMPLYCNT", "EMPLYCNT", "EMPLYCO"]
         for k in tot_keys:
@@ -271,14 +280,17 @@ def process_and_filter(df, sido, reg_name, code, active_only):
 
     df["종업원(근로자)수"] = df.apply(extract_emp, axis=1)
 
+    # 전화번호
     tel_col = norm.get("TELNO", None)
     df["전화번호"] = df[tel_col].astype(str).str.strip().replace(["", "None", "nan", "null"], "-") if tel_col else "-"
 
+    # 영업상태 필터
     stts_col = norm.get("SALSSTTSNM", norm.get("DTLSALSSTTSNM", None))
     df["영업상태명"] = df[stts_col].astype(str).str.strip() if stts_col else "정상"
     if active_only and stts_col:
         df = df[df["영업상태명"].str.contains("영업|정상", na=False)]
 
+    # 자치단체코드 필터링
     gov_col = norm.get("OPNATMYGRPCD", None)
     df["지자체코드"] = df[gov_col].astype(str).str.strip() if gov_col else ""
 
@@ -323,33 +335,33 @@ def process_and_filter(df, sido, reg_name, code, active_only):
     filtered = filtered.sort_values(by="인허가일자", ascending=False)
     return filtered
 
-# 8. 16칸 라벨지 (A4 / 2열 8행 - 폼텍 3107 호환) HTML 생성기
-def generate_16_labels_html(df_target):
-    html = """<!DOCTYPE html>
+# 8. 16칸 라벨지 (A4 / 2열 8행) HTML 생성 함수
+def generate_16_labels_html(df_target, title_suffix=""):
+    html = f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>우체국 B2B DM 우편 발송 라벨 (16칸)</title>
+<title>우체국 DM 우편 발송 라벨 (16칸) {title_suffix}</title>
 <style>
-  @page { size: A4 portrait; margin: 12.5mm 5.9mm; }
-  * { box-sizing: border-box; }
-  body { margin: 0; padding: 0; font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; background: #ffffff; }
-  .print-bar { text-align: center; padding: 12px; background: #f1f3f5; border-bottom: 1px solid #ced4da; margin-bottom: 15px; }
-  .print-btn { background-color: #d32f2f; color: white; padding: 10px 24px; font-size: 15px; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; }
-  @media print { .print-bar { display: none; } }
-  .page { width: 198.2mm; height: 272mm; display: grid; grid-template-columns: 99.1mm 99.1mm; grid-template-rows: repeat(8, 34mm); page-break-after: always; }
-  .label-box { width: 99.1mm; height: 34mm; padding: 4mm 6mm 3mm 6mm; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; line-height: 1.35; }
-  .address-line { font-size: 11px; color: #212529; word-break: keep-all; }
-  .recipient-tag { font-weight: bold; color: #000000; margin-right: 4px; }
-  .company-line { font-size: 13px; font-weight: bold; color: #000000; margin-top: 2px; }
-  .zipcode-line { font-size: 13px; font-weight: bold; color: #000000; letter-spacing: 2px; text-align: right; }
+  @page {{ size: A4 portrait; margin: 12.5mm 5.9mm; }}
+  * {{ box-sizing: border-box; }}
+  body {{ margin: 0; padding: 0; font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; background: #ffffff; }}
+  .print-bar {{ text-align: center; padding: 12px; background: #f1f3f5; border-bottom: 1px solid #ced4da; margin-bottom: 15px; }}
+  .print-btn {{ background-color: #d32f2f; color: white; padding: 10px 24px; font-size: 15px; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; }}
+  @media print {{ .print-bar {{ display: none; }} }}
+  .page {{ width: 198.2mm; height: 272mm; display: grid; grid-template-columns: 99.1mm 99.1mm; grid-template-rows: repeat(8, 34mm); page-break-after: always; }}
+  .label-box {{ width: 99.1mm; height: 34mm; padding: 4mm 6mm 3mm 6mm; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; line-height: 1.35; }}
+  .address-line {{ font-size: 11px; color: #212529; word-break: keep-all; }}
+  .recipient-tag {{ font-weight: bold; color: #000000; margin-right: 4px; }}
+  .company-line {{ font-size: 13px; font-weight: bold; color: #000000; margin-top: 2px; }}
+  .zipcode-line {{ font-size: 13px; font-weight: bold; color: #000000; letter-spacing: 2px; text-align: right; }}
 </style>
 </head>
 <body>
 <div class="print-bar">
   <button class="print-btn" onclick="window.print()">🖨️ 16칸 라벨지 바로 인쇄 (Ctrl + P)</button>
   <p style="margin: 6px 0 0 0; font-size: 12px; color: #495057;">
-    * 브라우저 인쇄 설정에서 <b>여백: 없음(None)</b> 및 <b>배율: 100% (기본값)</b>으로 지정하시면 16칸 라벨지에 정확히 출력됩니다.
+    * 인쇄 설정: <b>여백: 없음(None)</b>, <b>배율: 100% (기본값)</b> 지정 시 정확히 맞습니다.
   </p>
 </div>
 """
@@ -375,174 +387,214 @@ def generate_16_labels_html(df_target):
     html += "</body></html>"
     return html
 
-# 9. 메인 화면 탭 구성
-tab1, tab2 = st.tabs(["📋 실시간 명부 & 라벨 출력", "📊 지역별 5대 업종 비교 분석"])
+# 9. 메인 화면 3대 탭 구성 (법인 / 소상공인 / 비교분석)
+tab1, tab2, tab3 = st.tabs([
+    "🏢 법인 실시간 명부 (B2B 결제·급여)",
+    "🏪 신규 소상공인 리스트 (노란우산·소상공인예금)",
+    "📊 지역별 5대 업종 비교 분석"
+])
 
-# --- [TAB 1: 실시간 명부 & 라벨 출력] ---
+# 데이터 공통 수집 블록
+filtered_df = pd.DataFrame()
+raw_df = None
+err_msg = None
+
+if user_api_key:
+    raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, scan_pages)
+    if raw_df is not None and not raw_df.empty:
+        filtered_df = process_and_filter(raw_df, sido_choice, selected_region_name, target_code, only_active)
+
+# --- [TAB 1: 법인 실시간 명부 & 라벨] ---
 with tab1:
     if user_api_key:
-        with st.spinner(f"'{selected_region_name}'의 '{selected_industry}' 데이터를 고속 병렬 수집 중입니다..."):
-            raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, scan_pages)
-        
         if err_msg:
             st.error(err_msg)
-        elif raw_df is not None and not raw_df.empty:
-            filtered_df = process_and_filter(raw_df, sido_choice, selected_region_name, target_code, only_active)
-            filtered_df["영업상태"] = "접촉 전"
+        elif not filtered_df.empty:
+            corp_df = filtered_df[filtered_df["사업자구분"] == "법인"].copy()
+            corp_df["영업상태"] = "접촉 전"
             
-            if selected_industry == "의원":
-                focus_target = "요양급여 결제계좌"
-            elif selected_industry == "식품제조가공업":
-                focus_target = "B2B 결제/대량 급여이체"
-            elif selected_industry == "건설폐기물처리업":
-                focus_target = "공사 기성금/법인MMDA"
-            else:
-                focus_target = "대량 급여이체 수수료 면제"
-                
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric(f"{selected_region_name} 발굴", f"{len(filtered_df)} 개소")
-            tot_emp = filtered_df["종업원(근로자)수"].sum() if not filtered_df.empty else 0
-            
-            if tot_emp > 0:
-                emp_display = f"{tot_emp:,} 명"
-            else:
-                emp_display = "신설 법인 (확인 요망)"
-                
-            c2.metric("잠재 급여이체 대상", emp_display)
-            c3.metric("중점 유치 대상", focus_target)
-            c4.metric("전국 병렬 스캔 모수", f"{len(raw_df):,} 건")
+            c1.metric(f"{selected_region_name} 법인 발굴", f"{len(corp_df)} 개소")
+            tot_emp = corp_df["종업원(근로자)수"].sum() if not corp_df.empty else 0
+            c2.metric("잠재 급여이체 대상", f"{tot_emp:,} 명" if tot_emp > 0 else "신설 법인")
+            c3.metric("중점 유치 대상", "B2B 결제계좌 / 대량 급여이체 / 법인MMDA")
+            c4.metric("전국 스캔 모수", f"{len(raw_df):,} 건")
             
             st.divider()
             
-            if not filtered_df.empty:
-                display_table_df = filtered_df.copy()
-                display_table_df["종업원수(표시)"] = display_table_df["종업원(근로자)수"].apply(
-                    lambda v: f"{v}명" if v > 0 else "신설 (미기재)"
+            if not corp_df.empty:
+                display_corp = corp_df.copy()
+                display_corp["종업원수(표시)"] = display_corp["종업원(근로자)수"].apply(lambda v: f"{v}명" if v > 0 else "신설 (미기재)")
+                
+                dist = selected_region_name.split(" ")[-1]
+                display_corp["업체정보"] = display_corp["사업장명"].apply(
+                    lambda nm: f"https://map.naver.com/p/search/{urllib.parse.quote(f'{dist} {re.sub(r'\(주\)|\(유\)|주식회사|유한회사', '', str(nm)).strip()}')}"
+                )
+                display_corp["건물위치"] = display_corp["사업장소재지"].apply(
+                    lambda ad: f"https://map.naver.com/p/search/{urllib.parse.quote(re.sub(r'\(.*?\)|,.*$', '', str(ad)).strip())}"
                 )
                 
-                # 1) 업체정보 검색 URL: 정제된 상호명 + 시군구 (플레이스 프로필 우선 조회)
-                def make_corp_search_url(row):
-                    raw_name = str(row.get("사업장명", "")).strip()
-                    clean_name = re.sub(r"\(주\)|\(유\)|주식회사|유한회사|\s+", " ", raw_name).strip()
-                    dist = selected_region_name.split(" ")[-1]
-                    query = f"{dist} {clean_name}"
-                    return f"https://map.naver.com/p/search/{urllib.parse.quote(query)}"
-
-                # 2) 현장위치 검색 URL: 쉼표/층수/괄호 제거한 순수 도로명주소
-                def make_addr_search_url(row):
-                    raw_addr = str(row.get("사업장소재지", "")).strip()
-                    clean_addr = re.sub(r",.*$", "", raw_addr)
-                    clean_addr = re.sub(r"\(.*?\)", "", clean_addr).strip()
-                    return f"https://map.naver.com/p/search/{urllib.parse.quote(clean_addr)}"
-
-                display_table_df["업체정보"] = display_table_df.apply(make_corp_search_url, axis=1)
-                display_table_df["현장위치"] = display_table_df.apply(make_addr_search_url, axis=1)
+                view_cols = ["인허가일자", "사업장명", "우편번호", "사업장소재지", "업체정보", "건물위치", "종업원수(표시)", "전화번호", "영업상태"]
+                st.subheader(f"🏢 {selected_region_name} {selected_industry} 법인 명부 ({len(corp_df)}건 확보)")
                 
-                view_cols = ["인허가일자", "사업장명", "우편번호", "사업장소재지", "업체정보", "현장위치", "종업원수(표시)", "전화번호", "영업상태"]
-                st.subheader(f"📋 {selected_region_name} {selected_industry} 실시간 명부 ({len(filtered_df)}건 확보)")
-                
-                edited_df = st.data_editor(
-                    display_table_df[view_cols],
+                edited_corp = st.data_editor(
+                    display_corp[view_cols],
                     column_config={
                         "인허가일자": st.column_config.TextColumn("개설(인허가)일자"),
                         "우편번호": st.column_config.TextColumn("우편번호"),
-                        "업체정보": st.column_config.LinkColumn("플레이스 조회", display_text="🏢 업체정보"),
-                        "현장위치": st.column_config.LinkColumn("위치/로드뷰", display_text="📍 건물위치"),
-                        "종업원수(표시)": st.column_config.TextColumn("종업원(근로자)수"),
+                        "업체정보": st.column_config.LinkColumn("플레이스", display_text="🏢 업체정보"),
+                        "건물위치": st.column_config.LinkColumn("지도/로드뷰", display_text="📍 건물위치"),
+                        "종업원수(표시)": st.column_config.TextColumn("종업원수"),
                         "영업상태": st.column_config.SelectboxColumn(
                             "영업 단계",
                             options=["접촉 전", "전화(TM) 완료", "방문 예정", "상담 진행중", "계좌 개설 완료", "보류"],
                             required=True
                         )
                     },
-                    disabled=["인허가일자", "사업장명", "우편번호", "사업장소재지", "업체정보", "현장위치", "종업원수(표시)", "전화번호"],
+                    disabled=["인허가일자", "사업장명", "우편번호", "사업장소재지", "업체정보", "건물위치", "종업원수(표시)", "전화번호"],
                     hide_index=True,
                     use_container_width=True
                 )
                 
                 st.divider()
 
-                # --- 🔍 금융위원회 기업기본정보 심층 조회 패널 ---
-                st.subheader("🔍 금융위원회 기업기본정보 심층 조회 (대표자 실명 / 주거래은행 / 공시 종업원)")
-                st.caption("위 명부에서 기업을 선택하거나 상호명을 검색하여 공시된 대표자 성명, 주거래은행, 사업자번호, 종업원수를 대조합니다.")
-                
-                comp_list = display_table_df["사업장명"].tolist()
+                # 금융위원회 기업기본정보 심층조회 패널
+                st.subheader("🔍 금융위원회 기업기본정보 심층 조회 (대표자 실명 / 주거래은행)")
+                comp_list = display_corp["사업장명"].tolist()
                 col_sel1, col_sel2 = st.columns([3, 1])
                 with col_sel1:
-                    target_corp_query = st.selectbox("조회할 사업장 선택 (직접 검색 가능)", options=comp_list, index=0)
+                    target_corp_query = st.selectbox("조회할 법인 선택", options=comp_list, index=0)
                 with col_sel2:
                     st.write("")
                     st.write("")
                     btn_corp_search = st.button("🏢 기업개요 실시간 조회", type="primary")
 
                 if btn_corp_search and target_corp_query:
-                    with st.spinner(f"'{target_corp_query}'의 금융위원회 기업기본정보 조회 중..."):
+                    with st.spinner(f"'{target_corp_query}'의 금융위원회 기업개요 조회 중..."):
                         corp_info = search_corp_outline(user_api_key, target_corp_query)
-                    
                     if corp_info:
-                        st.success(f"✅ 금융위원회 공시 법인 확인: **{corp_info.get('corpNm', target_corp_query)}**")
-                        
-                        # 1단 핵심 메트릭
+                        st.success(f"✅ 금융위원회 등록 확인: **{corp_info.get('corpNm', target_corp_query)}**")
                         ci1, ci2, ci3, ci4 = st.columns(4)
                         ci1.metric("대표자 성명", corp_info.get("enpRprFnm", "미등재"))
                         ci2.metric("공시 종업원수", f"{corp_info.get('enpEmpeCnt', '0')} 명")
-                        
                         main_bank = corp_info.get("enpMntrBnkNm", None)
                         ci3.metric("현재 주거래은행", main_bank if main_bank and main_bank != "NULL" else "미등재")
-                        
                         avg_slry = corp_info.get("enpPn1AvgSlryAmt", "0")
                         ci4.metric("1인 평균 급여", f"{int(float(avg_slry)):,} 원" if avg_slry and avg_slry != "0" else "정보 없음")
-                        
-                        # 2단 상세 기업 개요
-                        with st.expander("📄 법인 상세 식별 정보 (사업자번호, 법인번호, 본점주소)"):
-                            c_sub1, c_sub2 = st.columns(2)
-                            with c_sub1:
-                                st.write(f"* **사업자등록번호(bzno)**: {corp_info.get('bzno', '정보 없음')}")
-                                st.write(f"* **법인등록번호(crno)**: {corp_info.get('crno', '정보 없음')}")
-                                st.write(f"* **설립일자**: {corp_info.get('enpEstbDt', '정보 없음')}")
-                            with c_sub2:
-                                st.write(f"* **표준산업분류**: {corp_info.get('sicNm', '정보 없음')}")
-                                st.write(f"* **본점 기본주소**: {corp_info.get('enpBsadr', '정보 없음')}")
-                                st.write(f"* **중소기업 여부**: {'예(중소기업)' if corp_info.get('smenpYn') == 'Y' else '일반/대기업'}")
                     else:
-                        st.warning(f"⚠️ '{target_corp_query}'에 대한 금융위원회 기업개요 데이터가 없습니다. (소규모 개인사업자이거나 금융위 공시 대상 외 법인일 수 있습니다.)")
+                        st.warning(f"⚠️ '{target_corp_query}'에 대한 금융위 기업개요 데이터가 없습니다.")
 
                 st.divider()
 
-                # 16칸 주소 라벨지 생성
-                pre_contact_df = edited_df[edited_df["영업상태"] == "접촉 전"]
-                st.subheader("🖨️ 16칸 DM 주소 라벨 인쇄 (접촉 전 업체 대상)")
-                
-                if not pre_contact_df.empty:
-                    req_pages = (len(pre_contact_df) + 15) // 16
+                # 법인 주소 라벨 인쇄
+                pre_contact_corp = edited_corp[edited_corp["영업상태"] == "접촉 전"]
+                st.subheader("🖨️ 법인 16칸 DM 주소 라벨 인쇄")
+                if not pre_contact_corp.empty:
+                    req_pages = (len(pre_contact_corp) + 15) // 16
                     m1, m2, m3 = st.columns(3)
-                    m1.metric("라벨 출력 대상", f"{len(pre_contact_df)} 건")
-                    m2.metric("필요 16칸 라벨지(A4)", f"{req_pages} 장")
-                    m3.metric("규격 호환", "폼텍 3107 / 2열 8행")
+                    m1.metric("라벨 출력 대상", f"{len(pre_contact_corp)} 건")
+                    m2.metric("필요 라벨지", f"{req_pages} 장 (16칸)")
+                    m3.metric("호환 규격", "폼텍 3107 / 2열 8행")
                     
-                    label_html_content = generate_16_labels_html(pre_contact_df)
-                    
+                    label_html = generate_16_labels_html(pre_contact_corp, "(법인)")
                     st.download_button(
-                        label=f"📄 {selected_region_name} '접촉 전' 16칸 주소라벨 파일(HTML) 다운로드 / 인쇄",
-                        data=label_html_content,
-                        file_name=f"우체국_16주소라벨_{selected_region_name}_{datetime.date.today()}.html",
+                        label=f"📄 {selected_region_name} 법인 16칸 라벨 다운로드/인쇄",
+                        data=label_html,
+                        file_name=f"우체국_법인라벨_{selected_region_name}_{datetime.date.today()}.html",
                         mime="text/html"
                     )
-                    
-                    with st.expander("👀 16칸 라벨 인쇄 화면 미리보기"):
-                        components.html(label_html_content, height=450, scrolling=True)
                 else:
-                    st.info("현재 모든 업체의 진행 단계가 변경되어 '접촉 전' 상태인 업체가 없습니다.")
+                    st.info("모든 법인의 영업 단계가 변경되어 '접촉 전' 상태인 대상이 없습니다.")
             else:
-                st.warning(f"전국 최신 {len(raw_df):,}건 중 '{selected_region_name}' 소재 {selected_industry} 사업장이 없습니다.")
-                st.info("💡 사이드바의 **[수집 페이지 수]**를 20~30장으로 늘려 스캔 범위를 확대해 보세요.")
+                st.info(f"현재 수집 범위 내 '{selected_region_name}' 소재 법인 사업장이 없습니다. 상단 '신규 소상공인 리스트' 탭을 확인해 보세요.")
         else:
-            st.warning("데이터를 가져오지 못했습니다.")
+            st.warning(f"'{selected_region_name}' 소재 사업장이 검색되지 않았습니다. 사이드바 탐색 범위를 넓혀보세요.")
     else:
-        st.info("👈 사이드바에 공공데이터 API 인증키를 입력하세요.")
+        st.info("👈 사이드바에 공공데이터 API 인증키를 확인해주세요.")
 
-# --- [TAB 2: 지역별 5대 업종 비교 분석 차트] ---
+# --- [TAB 2: 신규 소상공인 리스트 (별도 탭 신설)] ---
 with tab2:
+    if user_api_key:
+        if err_msg:
+            st.error(err_msg)
+        elif not filtered_df.empty:
+            sole_df = filtered_df[filtered_df["사업자구분"] == "소상공인(개인)"].copy()
+            sole_df["영업상태"] = "접촉 전"
+            
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric(f"{selected_region_name} 신규 소상공인", f"{len(sole_df)} 개소")
+            c2.metric("최우선 추천 상품", "노란우산공제 (폐업·노후보장)")
+            c3.metric("연계 우대 혜택", "우체국 소상공인예금 +0.5%p")
+            c4.metric("관할 지역", selected_region_name)
+            
+            st.divider()
+            
+            if not sole_df.empty:
+                display_sole = sole_df.copy()
+                display_sole["추천상품"] = "노란우산공제 & 소상공인정기예금"
+                
+                dist = selected_region_name.split(" ")[-1]
+                display_sole["업체정보"] = display_sole["사업장명"].apply(
+                    lambda nm: f"https://map.naver.com/p/search/{urllib.parse.quote(f'{dist} {str(nm).strip()}')}"
+                )
+                display_sole["건물위치"] = display_sole["사업장소재지"].apply(
+                    lambda ad: f"https://map.naver.com/p/search/{urllib.parse.quote(re.sub(r'\(.*?\)|,.*$', '', str(ad)).strip())}"
+                )
+                
+                view_cols = ["인허가일자", "사업장명", "우편번호", "사업장소재지", "업체정보", "건물위치", "추천상품", "전화번호", "영업상태"]
+                st.subheader(f"🏪 {selected_region_name} 신규 소상공인(개인사업자) 명부 ({len(sole_df)}건 확보)")
+                
+                edited_sole = st.data_editor(
+                    display_sole[view_cols],
+                    column_config={
+                        "인허가일자": st.column_config.TextColumn("개설일자"),
+                        "우편번호": st.column_config.TextColumn("우편번호"),
+                        "업체정보": st.column_config.LinkColumn("플레이스", display_text="🏢 업체정보"),
+                        "건물위치": st.column_config.LinkColumn("지도/로드뷰", display_text="📍 건물위치"),
+                        "추천상품": st.column_config.TextColumn("중점 유치 제안"),
+                        "영업상태": st.column_config.SelectboxColumn(
+                            "영업 단계",
+                            options=["접촉 전", "전화(TM) 완료", "방문 예정", "노란우산 상담중", "통장 개설 완료", "보류"],
+                            required=True
+                        )
+                    },
+                    disabled=["인허가일자", "사업장명", "우편번호", "사업장소재지", "업체정보", "건물위치", "추천상품", "전화번호"],
+                    hide_index=True,
+                    use_container_width=True
+                )
+                
+                st.divider()
+
+                # 소상공인 맞춤 16칸 주소 라벨 인쇄
+                pre_contact_sole = edited_sole[edited_sole["영업상태"] == "접촉 전"]
+                st.subheader("🖨️ 소상공인 16칸 DM 주소 라벨 인쇄 (노란우산·우대예금 안내장 발송)")
+                if not pre_contact_sole.empty:
+                    req_pages = (len(pre_contact_sole) + 15) // 16
+                    sm1, sm2, sm3 = st.columns(3)
+                    sm1.metric("소상공인 출력 대상", f"{len(pre_contact_sole)} 건")
+                    sm2.metric("필요 라벨지", f"{req_pages} 장 (16칸)")
+                    sm3.metric("호환 규격", "폼텍 3107 / 2열 8행")
+                    
+                    label_html_sole = generate_16_labels_html(pre_contact_sole, "(소상공인)")
+                    st.download_button(
+                        label=f"📄 {selected_region_name} 소상공인 16칸 라벨 다운로드/인쇄",
+                        data=label_html_sole,
+                        file_name=f"우체국_소상공인라벨_{selected_region_name}_{datetime.date.today()}.html",
+                        mime="text/html"
+                    )
+                    with st.expander("👀 소상공인 16칸 라벨 미리보기"):
+                        components.html(label_html_sole, height=450, scrolling=True)
+                else:
+                    st.info("모든 소상공인의 영업 단계가 변경되어 '접촉 전' 상태인 대상이 없습니다.")
+            else:
+                st.info(f"선택하신 지역('{selected_region_name}')의 수집 범위 내 소상공인(개인사업자) 명부가 없습니다.")
+        else:
+            st.warning(f"'{selected_region_name}' 소재 사업장이 없습니다.")
+    else:
+        st.info("👈 사이드바에 공공데이터 API 인증키를 확인해주세요.")
+
+# --- [TAB 3: 지역별 5대 업종 비교 분석 차트] ---
+with tab3:
     st.subheader(f"📊 '{selected_region_name}' 5대 타깃 업종 모수 비교 분석")
     st.caption("선택하신 관할 지역의 5대 업종별 사업자 수와 근로자 규모를 실시간 집계합니다.")
     
@@ -553,7 +605,7 @@ with tab2:
             
             industries = list(API_URL_MAP.keys())
             for idx, ind_name in enumerate(industries):
-                progress_bar.progress((idx + 1) / len(industries), text=f"'{ind_name}' 데이터 수집 및 분석 중 ({idx+1}/{len(industries)})...")
+                progress_bar.progress((idx + 1) / len(industries), text=f"'{ind_name}' 수집 및 분석 중 ({idx+1}/{len(industries)})...")
                 raw_ind, _ = fetch_all_data(user_api_key, ind_name, scan_pages)
                 if raw_ind is not None and not raw_ind.empty:
                     f_df = process_and_filter(raw_ind, sido_choice, selected_region_name, target_code, only_active)
@@ -563,15 +615,7 @@ with tab2:
                     cnt = 0
                     emp_cnt = 0
                 
-                if ind_name == "의원":
-                    strategy = "요양급여 결제계좌 / 100% 국가보장 MMDA"
-                elif ind_name == "식품제조가공업":
-                    strategy = "B2B 대금정산 / 대량 급여이체 / 법인MMDA"
-                elif ind_name == "건설폐기물처리업":
-                    strategy = "기성금 수령 / 고금리 법인MMDA"
-                else:
-                    strategy = "대량 급여이체 수수료 평생면제 / 법인MMDA"
-                    
+                strategy = "요양급여 결제계좌 / 국가보장 MMDA" if ind_name == "의원" else "B2B 결제정산 / 급여이체 / 노란우산"
                 industry_stats.append({
                     "업종": ind_name,
                     "사업체수": cnt,
@@ -582,40 +626,33 @@ with tab2:
             progress_bar.empty()
             
             df_stat = pd.DataFrame(industry_stats).sort_values(by="사업체수", ascending=False)
-            
             top_ind = df_stat.iloc[0]["업종"] if not df_stat.empty and df_stat.iloc[0]["사업체수"] > 0 else "-"
             total_biz = df_stat["사업체수"].sum()
-            total_emp_all = df_stat["종업원수"].sum()
             
             sc1, sc2, sc3 = st.columns(3)
             sc1.metric(f"{selected_region_name} 최다 업종 (1위)", top_ind)
             sc2.metric("5대 업종 총 사업체수", f"{total_biz:,} 개소")
-            sc3.metric("잠재 총 종사자수", f"{total_emp_all:,} 명" if total_emp_all > 0 else "신설 법인 위주")
+            sc3.metric("잠재 총 종사자수", f"{df_stat['종업원수'].sum():,} 명")
             
             st.divider()
             
             col_chart1, col_chart2 = st.columns(2)
             with col_chart1:
                 st.markdown("##### 🏢 업종별 사업체 수 (개소)")
-                chart_biz = df_stat.set_index("업종")[["사업체수"]]
-                st.bar_chart(chart_biz, color="#0b5394")
+                st.bar_chart(df_stat.set_index("업종")[["사업체수"]], color="#0b5394")
                 
             with col_chart2:
-                st.markdown("##### 👥 업종별 잠재 종업원 규모 (명)")
-                chart_emp = df_stat.set_index("업종")[["종업원수"]]
-                st.bar_chart(chart_emp, color="#d32f2f")
+                st.markdown("##### 👥 업종별 종업원 규모 (명)")
+                st.bar_chart(df_stat.set_index("업종")[["종업원수"]], color="#d32f2f")
             
             st.divider()
-            
             st.markdown("##### 📋 5대 업종 순위 및 영업 타깃 분석표")
-            display_stat = df_stat.rename(columns={
-                "업종": "타깃 업종",
-                "사업체수": "발굴 사업체 수(개소)",
-                "종업원수": "총 종업원 수(명)",
-                "추천전략": "중점 유치 상품"
-            })
-            st.dataframe(display_stat, hide_index=True, use_container_width=True)
+            st.dataframe(
+                df_stat.rename(columns={"업종": "타깃 업종", "사업체수": "발굴 사업체 수(개소)", "종업원수": "총 종업원 수(명)", "추천전략": "중점 유치 상품"}),
+                hide_index=True,
+                use_container_width=True
+            )
         else:
-            st.info("👆 위 **[5대 업종 분포 현황 집계 및 차트 생성]** 버튼을 누르면 설정된 범위 내 5대 업종 현황을 집계합니다.")
+            st.info("👆 위 **[5대 업종 분포 현황 집계 및 차트 생성]** 버튼을 누르면 관내 현황을 집계합니다.")
     else:
-        st.info("👈 사이드바에 공공데이터 API 인증키를 입력하세요.")
+        st.info("👈 사이드바에 공공데이터 API 인증키를 확인해주세요.")
