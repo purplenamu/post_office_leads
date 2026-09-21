@@ -19,7 +19,8 @@ API_URL_MAP = {
     "건설폐기물처리업": "https://apis.data.go.kr/1741000/construction_waste_disposal/info",
     "의원": "https://apis.data.go.kr/1741000/clinics/info",
     "건물위생관리업": "https://apis.data.go.kr/1741000/building_sanitation/info",
-    "소독업": "https://apis.data.go.kr/1741000/disinfection_companies/info"
+    "소독업": "https://apis.data.go.kr/1741000/disinfection_companies/info",
+    
     # 🌟 소상공인 API 추가
     "음식점업 (소상공인)": "https://apis.data.go.kr/B553077/api/open/sdsc2/storeListInUpjong",
     "소매업 (소상공인)": "https://apis.data.go.kr/B553077/api/open/sdsc2/storeListInUpjong",
