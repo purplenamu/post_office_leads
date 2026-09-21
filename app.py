@@ -357,8 +357,8 @@ def process_and_filter(df, sido, reg_name, code, active_only):
         c_addr = df["사업장소재지"].str.contains(addr_regex, regex=True, na=False)
         filtered = df[c_code | c_addr].copy()
 
-filtered = filtered.sort_values(by="인허가일자", ascending=False)
-return filtered
+    filtered = filtered.sort_values(by="인허가일자", ascending=False)
+    return filtered
     
 # 8. 16칸 라벨지 (A4 / 2열 8행) HTML 생성 함수
 def generate_16_labels_html(df_target, title_suffix=""):
