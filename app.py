@@ -68,8 +68,9 @@ default_key = ""
 try:
     if "PUBLIC_DATA_KEY" in st.secrets:
         default_key = st.secrets["PUBLIC_DATA_KEY"]
-except Exception:
-    default_key = ""
+except Exception as e:
+    st.error(f"'{사업장명}' 데이터 수신에 실패했습니다.")
+    st.write(f"상세 에러: {e}")  # 이 줄을 추가하여 원인 파악
 
 with st.sidebar:
     st.header("🔑 API 및 타깃 관할 설정")
