@@ -20,6 +20,15 @@ API_URL_MAP = {
     "의원": "https://apis.data.go.kr/1741000/clinics/info",
     "건물위생관리업": "https://apis.data.go.kr/1741000/building_sanitation/info",
     "소독업": "https://apis.data.go.kr/1741000/disinfection_companies/info"
+    # 🌟 소상공인 API 추가
+    "음식점업 (소상공인)": "https://apis.data.go.kr/B553077/api/open/sdsc2/storeListInUpjong",
+    "소매업 (소상공인)": "https://apis.data.go.kr/B553077/api/open/sdsc2/storeListInUpjong",
+}
+
+# 소상공인 업종별 대분류 코드 매핑
+SOSTG_UPJONG_MAP = {
+    "음식점업 (소상공인)": "I",
+    "소매업 (소상공인)": "G",
 }
 
 # 금융위원회 기업기본정보(기업개요) 공식 엔드포인트
@@ -91,36 +100,50 @@ with st.sidebar:
     )
 
 # 4. 단일 페이지 호출 함수
-def fetch_single_page(clean_key, target_url, page):
-    params = {
-        "serviceKey": clean_key,
-        "pageNo": str(page),
-        "numOfRows": "100",
-        "resultType": "json"
-    }
+def fetch_single_page(clean_key, target_url, page, industry_name="", target_code=""):
+    # 소상공인 API 요청인 경우
+    if "sdsc2" in target_url:
+        params = {
+            "serviceKey": clean_key,
+            "divId": "ctprvn",  # 시도 단위 또는 행정동 단위 조회 (예시: 시도코드 등)
+            "key": "26",        # 예시: 부산광역시 코드(26) 또는 입력받은 행정동/시도 코드
+            "indsLclsCd": SOSTG_UPJONG_MAP.get(industry_name, "I"),
+            "pageNo": str(page),
+            "numOfRows": "1000",
+            "type": "json"
+        }
+    else:
+        # 기존 행안부 인허가 API 요청
+        params = {
+            "serviceKey": clean_key,
+            "pageNo": str(page),
+            "numOfRows": "100",
+            "resultType": "json"
+        }
     try:
         res = requests.get(target_url, params=params, timeout=(10, 20))
         if res.status_code != 200:
             return None
-        try:
-            data = res.json()
+        
+        data = res.json()
+        
+        # 소상공인 API 응답 구조 대응
+        if "sdsc2" in target_url:
+            items = data.get("body", {}).get("items", [])
+            if isinstance(items, dict):
+                items = [items]
+            if items:
+                return pd.DataFrame(items)
+        else:
+            # 기존 인허가 API 응답 구조
             items = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
             if isinstance(items, dict):
                 items = [items]
             if items:
                 return pd.DataFrame(items)
-        except Exception:
-            pass
-
-        try:
-            root = ET.fromstring(res.text)
-            items_xml = root.findall(".//item")
-            if items_xml:
-                return pd.DataFrame([{c.tag: c.text for c in item} for item in items_xml])
-        except Exception:
-            pass
+                
     except Exception:
-        return None
+        pass
     return None
 
 # 5. 다중 페이지 병렬 동시 수집 함수
@@ -138,7 +161,7 @@ def fetch_all_data(api_key, industry_name, total_pages):
     max_workers = min(total_pages, 15)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_page = {
-            executor.submit(fetch_single_page, clean_key, target_url, page): page
+            executor.submit(fetch_single_page, clean_key, target_url, page, industry_name, target_code): page
             for page in range(1, total_pages + 1)
         }
         completed_count = 0
@@ -201,11 +224,12 @@ def search_corp_outline(api_key, query_name):
             continue
     return None
 
-# 7. 데이터 정밀 가공 (법인 vs 소상공인 자동 분류)
+# 7. 데이터 정밀 가공 (법인 vs 소상공인 자동 분류 및 컬럼 호환)
 def process_and_filter(df, sido, reg_name, code, active_only):
     norm = {str(c).upper().replace("_", ""): c for c in df.columns}
-    
-    name_col = norm.get("BPLCNM", df.columns[0])
+
+    # 🌟 사업장명 (기존 BPLCNM + 소상공인 BIZESNM 호환)
+    name_col = norm.get("BPLCNM", norm.get("BIZESNM", df.columns[0]))
     df["사업장명"] = df[name_col].astype(str).str.strip()
 
     # 법인 vs 소상공인(개인) 자동 판별
@@ -215,9 +239,9 @@ def process_and_filter(df, sido, reg_name, code, active_only):
         return "소상공인(개인)"
     df["사업자구분"] = df["사업장명"].apply(classify_biz)
 
-    # 인허가일자
+    # 인허가일자 (소상공인 API는 인허가일자가 없으므로 '-' 처리)
     date_col = norm.get("LCPMTYMD", norm.get("PRMISNDE", norm.get("APVPERMYMD", None)))
-    if date_col:
+    if date_col and date_col in df.columns:
         def fmt_d(v):
             if pd.isna(v) or str(v).strip() in ["", "None", "nan", "null", "-"]:
                 return "-"
@@ -229,9 +253,9 @@ def process_and_filter(df, sido, reg_name, code, active_only):
     else:
         df["인허가일자"] = "-"
 
-    # 주소
-    r_col = norm.get("ROADNMADDR", None)
-    l_col = norm.get("LOTNOADDR", None)
+    # 🌟 주소 (기존 ROADNMADDR / LOTNOADDR + 소상공인 RDNMADR / LNOADR 호환)
+    r_col = norm.get("ROADNMADDR", norm.get("RDNMADR", None))
+    l_col = norm.get("LOTNOADDR", norm.get("LNOADR", None))
     s_road = df[r_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if r_col else None
     s_lot = df[l_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if l_col else None
     
@@ -245,8 +269,8 @@ def process_and_filter(df, sido, reg_name, code, active_only):
         df["사업장소재지"] = "주소 확인 필요"
     df["사업장소재지"] = df["사업장소재지"].fillna("주소 확인 필요")
 
-    # 우편번호
-    zr_col = norm.get("ROADNMZIP", None)
+    # 🌟 우편번호 (기존 ROADNMZIP / LCTNZIP + 소상공인 ZIP 호환)
+    zr_col = norm.get("ROADNMZIP", norm.get("ZIP", None))
     zl_col = norm.get("LCTNZIP", None)
     s_zr = df[zr_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if zr_col else None
     s_zl = df[zl_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if zl_col else None
@@ -290,8 +314,8 @@ def process_and_filter(df, sido, reg_name, code, active_only):
     if active_only and stts_col:
         df = df[df["영업상태명"].str.contains("영업|정상", na=False)]
 
-    # 자치단체코드 필터링
-    gov_col = norm.get("OPNATMYGRPCD", None)
+    # 🌟 자치단체코드 필터링 (기존 OPNATMYGRPCD + 소상공인 SIGNGUCD 호환)
+    gov_col = norm.get("OPNATMYGRPCD", norm.get("SIGNGUCD", None))
     df["지자체코드"] = df[gov_col].astype(str).str.strip() if gov_col else ""
 
     busan_codes = set([str(c) for c in range(3250000, 3410000, 10000)] + ["6260000", "6260000_ALL"])
@@ -332,9 +356,9 @@ def process_and_filter(df, sido, reg_name, code, active_only):
         c_addr = df["사업장소재지"].str.contains(addr_regex, regex=True, na=False)
         filtered = df[c_code | c_addr].copy()
 
-    filtered = filtered.sort_values(by="인허가일자", ascending=False)
-    return filtered
-
+filtered = filtered.sort_values(by="인허가일자", ascending=False)
+return filtered
+    
 # 8. 16칸 라벨지 (A4 / 2열 8행) HTML 생성 함수
 def generate_16_labels_html(df_target, title_suffix=""):
     html = f"""<!DOCTYPE html>
