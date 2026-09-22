@@ -94,19 +94,19 @@ with st.sidebar:
         help="15페이지는 전국 최신 1,500건, 30페이지는 3,000건을 병렬로 고속 수집합니다."
     )
 
-# 4. 단일 페이지 호출 함수(지자체코드 파라미터 추가)
-def fetch_single_page(clean_key, target_url, page):
+# 4. 단일 페이지 호출 함수 (지자체코드 파라미터 추가)
+def fetch_single_page(clean_key, target_url, page, target_code):
     params = {
         "serviceKey": clean_key,
         "pageNo": str(page),
         "numOfRows": "100",
         "resultType": "json"
     }
-
+    
     # 광역 전체(ALL)가 아닌 특정 시·군·구 선택 시 API 조건 검색 파라미터 추가
     if target_code and not target_code.endswith("_ALL"):
         params["cond[OPN_ATMY_GRP_CD::EQ]"] = target_code
-        
+
     try:
         res = requests.get(target_url, params=params, timeout=(10, 20))
         if res.status_code != 200:
@@ -132,7 +132,7 @@ def fetch_single_page(clean_key, target_url, page):
         return None
     return None
 
-# 5. 다중 페이지 병렬 동시 수집 함수(target_code 전달)
+# 5. 다중 페이지 병렬 동시 수집 함수 (target_code 전달)
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_all_data(api_key, industry_name, total_pages, target_code):
     if not api_key:
@@ -413,6 +413,7 @@ if user_api_key:
     raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, scan_pages, target_code)
     if raw_df is not None and not raw_df.empty:
         filtered_df = process_and_filter(raw_df, sido_choice, selected_region_name, target_code, only_active)
+
 
 # --- [TAB 1: 법인 실시간 명부 & 라벨] ---
 with tab1:
