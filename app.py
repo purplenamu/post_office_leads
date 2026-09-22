@@ -17,13 +17,13 @@ st.caption("공공데이터 실시간 API + 금융위원회 기업기본정보 �
 API_URL_MAP = {
     "식품제조가공업": "https://apis.data.go.kr/1741000/food_manufacturing_processors/info",
     "건설폐기물처리업": "https://apis.data.go.kr/1741000/construction_waste_disposal/info",
-    "의원": "https://apis.data.go.kr/1741000/clinics/info",
     "건물위생관리업": "https://apis.data.go.kr/1741000/building_sanitation/info",
     "소독업": "https://apis.data.go.kr/1741000/disinfection_companies/info",
-
-    "미용업": "https://apis.data.go.kr/1741000/beauty_salons/info",
+    "의원": "https://apis.data.go.kr/1741000/clinics/info",
+    
     "일반음식점": "https://apis.data.go.kr/1741000/general_restaurants/info",
-    "휴게음식점": "https://apis.data.go.kr/1741000/rest_cafes/info"
+    "휴게음식점": "https://apis.data.go.kr/1741000/rest_cafes/info",
+    "미용업": "https://apis.data.go.kr/1741000/beauty_salons/info"
 }
 
 # 금융위원회 기업기본정보(기업개요) 공식 엔드포인트
@@ -393,8 +393,8 @@ def generate_16_labels_html(df_target, title_suffix=""):
 
 # 9. 메인 화면 3대 탭 구성 (법인 / 소상공인 / 비교분석)
 tab1, tab2, tab3 = st.tabs([
-    "🏢 법인 실시간 명부 (B2B 결제·급여)",
-    "🏪 신규 소상공인 리스트 (노란우산·소상공인예금)",
+    "🏢 법인 실시간 명부",
+    "🏪 신규 소상공인 리스트",
     "📊 지역별 5대 업종 비교 분석"
 ])
 
