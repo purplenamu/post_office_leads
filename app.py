@@ -606,11 +606,11 @@ with tab2:
 
 # --- [TAB 3: 지역별 8대 업종 비교 분석 차트] ---
 with tab3:
-    st.subheader(f"📊 '{selected_region_name}' 8대 타깃 업종 모수 비교 분석")
-    st.caption("선택하신 관할 지역의 5대 업종별 사업자 수와 근로자 규모를 실시간 집계합니다.")
     
-    if user_api_key:
-       if st.button("🚀 8대 업종 통합 데이터 수집 및 비교 분석 시작"):
+# app.py 의 비교 분석 섹션 로직
+st.subheader("📊 지역별 8대 주요 업종 비교 분석")
+
+if st.button("🚀 8대 업종 통합 데이터 수집 및 비교 분석 시작"):
     if not user_api_key:
         st.error("API 키를 입력해주세요.")
     else:
@@ -659,8 +659,4 @@ with tab3:
         
         # 2. 바 차트 시각화
         st.bar_chart(data=summary_df.set_index("업종명")[["소상공인(개인)", "법인"]])
-        
-        else:
-            st.info("👆 위 **[8대 업종 분포 현황 집계 및 차트 생성]** 버튼을 누르면 관내 현황을 집계합니다.")
-    else:
         st.info("👈 사이드바에 공공데이터 API 인증키를 확인해주세요.")
