@@ -400,7 +400,7 @@ def generate_16_labels_html(df_target, title_suffix=""):
 tab1, tab2, tab3 = st.tabs([
     "🏢 법인 실시간 명부",
     "🏪 신규 소상공인 리스트",
-    "📊 지역별 5대 업종 비교 분석"
+    "📊 지역별 8대 업종 비교 분석"
 ])
 
 # 데이터 공통 수집 블록
@@ -604,66 +604,63 @@ with tab2:
     else:
         st.info("👈 사이드바에 공공데이터 API 인증키를 확인해주세요.")
 
-# --- [TAB 3: 지역별 5대 업종 비교 분석 차트] ---
+# --- [TAB 3: 지역별 8대 업종 비교 분석 차트] ---
 with tab3:
-    st.subheader(f"📊 '{selected_region_name}' 5대 타깃 업종 모수 비교 분석")
+    st.subheader(f"📊 '{selected_region_name}' 8대 타깃 업종 모수 비교 분석")
     st.caption("선택하신 관할 지역의 5대 업종별 사업자 수와 근로자 규모를 실시간 집계합니다.")
     
     if user_api_key:
-        if st.button("🚀 5대 업종 분포 현황 집계 및 차트 생성", type="primary"):
-            industry_stats = []
-            progress_bar = st.progress(0, text="5대 업종 데이터 통합 분석 중...")
+       if st.button("🚀 8대 업종 통합 데이터 수집 및 비교 분석 시작"):
+    if not user_api_key:
+        st.error("API 키를 입력해주세요.")
+    else:
+        all_industry_results = []
+        progress_bar = st.progress(0, text="8대 업종 데이터를 순차적으로 수집 중...")
+        
+        industries_list = list(API_URL_MAP.keys())
+        
+        for idx, ind_name in enumerate(industries_list):
+            progress_bar.progress((idx + 1) / len(industries_list), text=f"[{idx+1}/8] '{ind_name}' 데이터 수집 중...")
             
-            industries = list(API_URL_MAP.keys())
-            for idx, ind_name in enumerate(industries):
-                progress_bar.progress((idx + 1) / len(industries), text=f"'{ind_name}' 수집 및 분석 중 ({idx+1}/{len(industries)})...")
-                raw_ind, _ = fetch_all_data(user_api_key, ind_name, scan_pages)
-                if raw_ind is not None and not raw_ind.empty:
-                    f_df = process_and_filter(raw_ind, sido_choice, selected_region_name, target_code, only_active)
-                    cnt = len(f_df)
-                    emp_cnt = f_df["종업원(근로자)수"].sum() if not f_df.empty else 0
-                else:
-                    cnt = 0
-                    emp_cnt = 0
+            # 이전 수정했던 target_code 전달 방식 적용 (지자체 검색 조건 적용)
+            raw_df, _ = fetch_all_data(user_api_key, ind_name, total_pages=scan_pages, target_code=target_code)
+            
+            if raw_df is not None and not raw_df.empty:
+                processed_df = process_and_filter(raw_df, sido_choice, selected_region_name, target_code, only_active)
                 
-                strategy = "요양급여 결제계좌 / 국가보장 MMDA" if ind_name == "의원" else "B2B 결제정산 / 급여이체 / 노란우산"
-                industry_stats.append({
-                    "업종": ind_name,
-                    "사업체수": cnt,
-                    "종업원수": emp_cnt,
-                    "추천전략": strategy
+                # 업종별 요약 집계
+                total_cnt = len(processed_df)
+                sme_cnt = len(processed_df[processed_df["사업자구분"] == "소소상공인(개인)"]) if "사업자구분" in processed_df.columns else 0
+                corp_cnt = len(processed_df[processed_df["사업자구분"] == "법인"]) if "사업자구분" in processed_df.columns else 0
+                
+                all_industry_results.append({
+                    "업종명": ind_name,
+                    "전체 신규 인허가 수": total_cnt,
+                    "소상공인(개인)": sme_cnt,
+                    "법인": corp_cnt
                 })
-            
-            progress_bar.empty()
-            
-            df_stat = pd.DataFrame(industry_stats).sort_values(by="사업체수", ascending=False)
-            top_ind = df_stat.iloc[0]["업종"] if not df_stat.empty and df_stat.iloc[0]["사업체수"] > 0 else "-"
-            total_biz = df_stat["사업체수"].sum()
-            
-            sc1, sc2, sc3 = st.columns(3)
-            sc1.metric(f"{selected_region_name} 최다 업종 (1위)", top_ind)
-            sc2.metric("5대 업종 총 사업체수", f"{total_biz:,} 개소")
-            sc3.metric("잠재 총 종사자수", f"{df_stat['종업원수'].sum():,} 명")
-            
-            st.divider()
-            
-            col_chart1, col_chart2 = st.columns(2)
-            with col_chart1:
-                st.markdown("##### 🏢 업종별 사업체 수 (개소)")
-                st.bar_chart(df_stat.set_index("업종")[["사업체수"]], color="#0b5394")
+            else:
+                all_industry_results.append({
+                    "업종명": ind_name,
+                    "전체 신규 인허가 수": 0,
+                    "소상공인(개인)": 0,
+                    "법인": 0
+                })
                 
-            with col_chart2:
-                st.markdown("##### 👥 업종별 종업원 규모 (명)")
-                st.bar_chart(df_stat.set_index("업종")[["종업원수"]], color="#d32f2f")
-            
-            st.divider()
-            st.markdown("##### 📋 5대 업종 순위 및 영업 타깃 분석표")
-            st.dataframe(
-                df_stat.rename(columns={"업종": "타깃 업종", "사업체수": "발굴 사업체 수(개소)", "종업원수": "총 종업원 수(명)", "추천전략": "중점 유치 상품"}),
-                hide_index=True,
-                use_container_width=True
-            )
+        progress_bar.empty()
+        
+        # 집계 결과를 데이터프레임으로 변환하여 시각화
+        summary_df = pd.DataFrame(all_industry_results)
+        
+        st.success("8대 업종 데이터 분석이 완료되었습니다!")
+        
+        # 1. 요약 표 출력
+        st.dataframe(summary_df, use_container_width=True)
+        
+        # 2. 바 차트 시각화
+        st.bar_chart(data=summary_df.set_index("업종명")[["소상공인(개인)", "법인"]])
+        
         else:
-            st.info("👆 위 **[5대 업종 분포 현황 집계 및 차트 생성]** 버튼을 누르면 관내 현황을 집계합니다.")
+            st.info("👆 위 **[8대 업종 분포 현황 집계 및 차트 생성]** 버튼을 누르면 관내 현황을 집계합니다.")
     else:
         st.info("👈 사이드바에 공공데이터 API 인증키를 확인해주세요.")
