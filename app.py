@@ -19,7 +19,11 @@ API_URL_MAP = {
     "건설폐기물처리업": "https://apis.data.go.kr/1741000/construction_waste_disposal/info",
     "의원": "https://apis.data.go.kr/1741000/clinics/info",
     "건물위생관리업": "https://apis.data.go.kr/1741000/building_sanitation/info",
-    "소독업": "https://apis.data.go.kr/1741000/disinfection_companies/info"
+    "소독업": "https://apis.data.go.kr/1741000/disinfection_companies/info",
+
+    "미용업": "https://apis.data.go.kr/1741000/beauty_salons/info",
+    "일반음식점": "https://apis.data.go.kr/1741000/general_restaurants/info",
+    "휴게음식점": "https://apis.data.go.kr/1741000/rest_cafes/info"
 }
 
 # 금융위원회 기업기본정보(기업개요) 공식 엔드포인트
