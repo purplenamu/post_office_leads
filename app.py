@@ -94,7 +94,7 @@ with st.sidebar:
         help="15페이지는 전국 최신 1,500건, 30페이지는 3,000건을 병렬로 고속 수집합니다."
     )
 
-# 4. 단일 페이지 호출 함수
+# 4. 단일 페이지 호출 함수(지자체코드 파라미터 추가)
 def fetch_single_page(clean_key, target_url, page):
     params = {
         "serviceKey": clean_key,
@@ -102,6 +102,11 @@ def fetch_single_page(clean_key, target_url, page):
         "numOfRows": "100",
         "resultType": "json"
     }
+
+    # 광역 전체(ALL)가 아닌 특정 시·군·구 선택 시 API 조건 검색 파라미터 추가
+    if target_code and not target_code.endswith("_ALL"):
+        params["cond[OPN_ATMY_GRP_CD::EQ]"] = target_code
+        
     try:
         res = requests.get(target_url, params=params, timeout=(10, 20))
         if res.status_code != 200:
@@ -127,9 +132,9 @@ def fetch_single_page(clean_key, target_url, page):
         return None
     return None
 
-# 5. 다중 페이지 병렬 동시 수집 함수
+# 5. 다중 페이지 병렬 동시 수집 함수(target_code 전달)
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_all_data(api_key, industry_name, total_pages):
+def fetch_all_data(api_key, industry_name, total_pages, target_code):
     if not api_key:
         return None, "인증키가 감지되지 않았습니다. Streamlit Secrets를 확인해주세요."
     
@@ -142,7 +147,7 @@ def fetch_all_data(api_key, industry_name, total_pages):
     max_workers = min(total_pages, 15)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_page = {
-            executor.submit(fetch_single_page, clean_key, target_url, page): page
+            executor.submit(fetch_single_page, clean_key, target_url, page, target_code): page
             for page in range(1, total_pages + 1)
         }
         completed_count = 0
@@ -403,8 +408,9 @@ filtered_df = pd.DataFrame()
 raw_df = None
 err_msg = None
 
+# 메인 데이터 호출부
 if user_api_key:
-    raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, scan_pages)
+    raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, scan_pages, target_code)
     if raw_df is not None and not raw_df.empty:
         filtered_df = process_and_filter(raw_df, sido_choice, selected_region_name, target_code, only_active)
 
