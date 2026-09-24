@@ -1,3 +1,4 @@
+import plotly.express as px
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
@@ -7,8 +8,6 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
-import plotly.express as px
 
 st.set_page_config(page_title="우체국 B2B & 소상공인 마케팅 알리미", layout="wide")
 
