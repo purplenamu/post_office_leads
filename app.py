@@ -6,8 +6,9 @@ import datetime
 import urllib.parse
 import xml.etree.ElementTree as ET
 import re
-import plotly.express as px
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import plotly.express as px
 
 st.set_page_config(page_title="우체국 B2B & 소상공인 마케팅 알리미", layout="wide")
 
