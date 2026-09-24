@@ -6,6 +6,7 @@ import datetime
 import urllib.parse
 import xml.etree.ElementTree as ET
 import re
+import plotly.express as px
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 st.set_page_config(page_title="우체국 B2B & 소상공인 마케팅 알리미", layout="wide")
@@ -662,8 +663,21 @@ with tab3:
             
             col_chart1, col_chart2 = st.columns(2)
             with col_chart1:
-                st.markdown("##### 🏢 업종별 사업체 수 (개소)")
-                st.bar_chart(df_stat.set_index("업종")[["사업체수"]], color="#0b5394")
+                st.markdown("##### 🏢 업종별 사업체 수 비중(원형 차트)")
+                
+                # Plotly 원형(도넛) 차트 생성
+                fig = px.pie(
+                df_stat,
+                names="업종",
+                values="사업체수",
+                hole=0.3,  # 0.3 설정 시 도넛 모양 (일반 원형을 원하시면 0으로 변경)
+                color_discrete_sequence=px.colors.qualitative.Set3
+                )
+                # 차트에 업종명과 퍼센트(%) 함께 표시
+                fig.update_traces(textinfo="label+percent", textposition="inside")
+                fig.update_layout(showlegend=False, margin=dict(l=10, r=10, t=30, b=10))
+                
+                st.plotly_chart(fig, use_container_width=True)
                 
             with col_chart2:
                 st.markdown("##### 👥 업종별 종업원 규모 (명)")
