@@ -85,32 +85,32 @@ with st.sidebar:
     
     only_active = st.checkbox("영업/정상 사업장만 조회", value=True)
 
-# 사이드바: 변동분 수집 시점 선택 옵션
-DATE_OPTIONS = {
-    "2020년 1월 1일 이후 (기본)": "20200101000000",
-    "전체 데이터": None,
-    "2025년 1월 1일 이후": "20250101000000",
-    "2025년 7월 1일 이후": "20250701000000",
-    "2026년 1월 1일 이후": "20260101000000",
-    "2026년 7월 1일 이후": "20260701000000",
-}
+    # 사이드바: 변동분 수집 시점 선택 옵션
+    DATE_OPTIONS = {
+        "2020년 1월 1일 이후 (기본)": "20200101000000",
+        "전체 데이터": None,
+        "2025년 1월 1일 이후": "20250101000000",
+        "2025년 7월 1일 이후": "20250701000000",
+        "2026년 1월 1일 이후": "20260101000000",
+        "2026년 7월 1일 이후": "20260701000000",
+    }
 
-selected_date_label = st.sidebar.selectbox(
-    "📅 변동분 수집 기준일",
-    options=list(DATE_OPTIONS.keys()),
-    index=0  # 0번("2020년 1월 1일 이후 (기본)")을 기본값으로 지정
-)
-updated_after_code = DATE_OPTIONS[selected_date_label]
+    selected_date_label = st.sidebar.selectbox(
+        "📅 변동분 수집 기준일",
+        options=list(DATE_OPTIONS.keys()),
+        index=0  # 0번("2020년 1월 1일 이후 (기본)")을 기본값으로 지정
+    )
+    updated_after_code = DATE_OPTIONS[selected_date_label]
 
-st.divider()
-st.subheader("🔍 전국 데이터 탐색 범위")
-scan_pages = st.slider(
-        "수집 페이지 수 (페이지당 100건)",
-        min_value=5,
-        max_value=30,
-        value=15,
-        help="15페이지는 전국 최신 1,500건, 30페이지는 3,000건을 병렬로 고속 수집합니다."
-)
+    st.divider()
+    st.subheader("🔍 전국 데이터 탐색 범위")
+    scan_pages = st.slider(
+            "수집 페이지 수 (페이지당 100건)",
+            min_value=5,
+            max_value=30,
+            value=15,
+            help="15페이지는 전국 최신 1,500건, 30페이지는 3,000건을 병렬로 고속 수집합니다."
+    )
 
 # 4. 단일 페이지 호출 함수 (지자체코드 파라미터 추가)
 def fetch_single_page(clean_key, target_url, page, target_code):
