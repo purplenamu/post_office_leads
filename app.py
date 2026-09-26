@@ -154,38 +154,28 @@ def fetch_single_page(clean_key, target_url, page, target_code, min_open_date="2
         return None
     return None
 
-# 5. 다중 페이지 병렬 동시 수집 함수 (target_code 전달)
+# 5. 다중 페이지 병렬 동시 수집 함수 (min_open_date 및 target_code 전달 반영)
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_all_data(clean_key, target_url, scan_pages, target_code, min_open_date="20200101"):
-    if not api_key:
+    if not clean_key:
         return None, "인증키가 감지되지 않았습니다. Streamlit Secrets를 확인해주세요."
     
-    clean_key = urllib.parse.unquote(api_key.strip())
-    target_url = API_URL_MAP[industry_name]
-    
     all_dfs = []
-    pbar = st.progress(0, text=f"'{industry_name}' 데이터 병렬 수집 중 (총 {total_pages}장)...")
+    pbar = st.progress(0, text=f"데이터 병렬 수집 중 (총 {scan_pages}장)...")
     
-    max_workers = min(total_pages, 15)
+    max_workers = min(scan_pages, 15)
+    future_to_page = {}
+    
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_page = {
-            executor.submit(fetch_single_page, clean_key, target_url, page, target_code): page
-            for page in range(1, total_pages + 1):
-                # 💡 fetch_single_page로 min_open_date 전달
-                df_page = fetch_single_page(clean_key, target_url, page, target_code, min_open_date)
-                if df_page is not None and not df_page.empty:
-                    all_dfs.append(df_page)
-                else:
-                    break
+        # 각 페이지별 작업을 ThreadPool에 등록 (min_open_date 전달)
+        for page in range(1, scan_pages + 1):
+            future = executor.submit(fetch_single_page, clean_key, target_url, page, target_code, min_open_date)
+            future_to_page[future] = page
             
-            if all_dfs:
-                return pd.concat(all_dfs, ignore_index=True), None
-            return None, "데이터가 없습니다."
-        }
         completed_count = 0
         for future in as_completed(future_to_page):
             completed_count += 1
-            pbar.progress(completed_count / total_pages, text=f"초고속 병렬 수집 중 ({completed_count}/{total_pages} 완료)...")
+            pbar.progress(completed_count / scan_pages, text=f"초고속 병렬 수집 중 ({completed_count}/{scan_pages} 완료)...")
             try:
                 pdf = future.result()
                 if pdf is not None and not pdf.empty:
@@ -201,7 +191,7 @@ def fetch_all_data(clean_key, target_url, scan_pages, target_code, min_open_date
         if dup_col:
             combined = combined.drop_duplicates(subset=[dup_col])
         return combined, None
-    return None, f"'{industry_name}' 데이터 수신에 실패했습니다."
+    return None, "데이터 수신에 실패했거나 조건에 맞는 데이터가 없습니다."
 
 # 6. 금융위원회 기업기본정보 단건 조회 함수
 @st.cache_data(ttl=86400, show_spinner=False)
