@@ -85,22 +85,22 @@ with st.sidebar:
     
     only_active = st.checkbox("영업/정상 사업장만 조회", value=True)
 
-    # 사이드바: 변동분 수집 시점 선택 옵션
+    # 사이드바: 인허가일자 기준 수집 시점 선택 옵션 (8자리로 수정)
     DATE_OPTIONS = {
-        "2020년 1월 1일 이후 (기본)": "20200101000000",
+        "2020년 1월 1일 이후 (기본)": "20200101",
         "전체 데이터": None,
-        "2025년 1월 1일 이후": "20250101000000",
-        "2025년 7월 1일 이후": "20250701000000",
-        "2026년 1월 1일 이후": "20260101000000",
-        "2026년 7월 1일 이후": "20260701000000",
+        "2025년 1월 1일 이후": "20250101",
+        "2025년 7월 1일 이후": "20250701",
+        "2026년 1월 1일 이후": "20260101",
+        "2026년 7월 1일 이후": "20260701",
     }
 
     selected_date_label = st.sidebar.selectbox(
-        "📅 변동분 수집 기준일",
+        "📅 인허가 기준일 선택",
         options=list(DATE_OPTIONS.keys()),
-        index=0  # 0번("2020년 1월 1일 이후 (기본)")을 기본값으로 지정
+        index=0
     )
-    updated_after_code = DATE_OPTIONS[selected_date_label]
+    min_open_date_code = DATE_OPTIONS[selected_date_label]
 
     st.divider()
     st.subheader("🔍 전국 데이터 탐색 범위")
