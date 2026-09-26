@@ -156,7 +156,7 @@ def fetch_single_page(clean_key, target_url, page, target_code, min_open_date="2
 
 # 5. 다중 페이지 병렬 동시 수집 함수 (target_code 전달)
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_all_data(api_key, industry_name, total_pages, target_code):
+def fetch_all_data(clean_key, target_url, scan_pages, target_code, min_open_date="20200101"):
     if not api_key:
         return None, "인증키가 감지되지 않았습니다. Streamlit Secrets를 확인해주세요."
     
@@ -170,7 +170,17 @@ def fetch_all_data(api_key, industry_name, total_pages, target_code):
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_page = {
             executor.submit(fetch_single_page, clean_key, target_url, page, target_code): page
-            for page in range(1, total_pages + 1)
+            for page in range(1, total_pages + 1):
+                # 💡 fetch_single_page로 min_open_date 전달
+                df_page = fetch_single_page(clean_key, target_url, page, target_code, min_open_date)
+                if df_page is not None and not df_page.empty:
+                    all_dfs.append(df_page)
+                else:
+                    break
+            
+            if all_dfs:
+                return pd.concat(all_dfs, ignore_index=True), None
+            return None, "데이터가 없습니다."
         }
         completed_count = 0
         for future in as_completed(future_to_page):
@@ -642,7 +652,7 @@ with tab3:
                 progress_bar.progress((idx + 1) / len(industries), text=f"'{ind_name}' 수집 및 분석 중 ({idx+1}/{len(industries)})...")
                 
                 # target_code를 함께 전달하여 지역별 정확한 수집 수행
-                raw_ind, _ = fetch_all_data(user_api_key, ind_name, scan_pages, target_code)
+                raw_ind, _ = fetch_all_data(user_api_key, ind_name, scan_pages, target_code, min_open_date=min_open_date_code)
                 
                 if raw_ind is not None and not raw_ind.empty:
                     f_df = process_and_filter(raw_ind, sido_choice, selected_region_name, target_code, only_active)
