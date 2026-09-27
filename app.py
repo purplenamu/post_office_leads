@@ -306,6 +306,14 @@ def process_and_filter(df, sido, region_name, target_code, only_active=True, min
         df["우편번호"] = "-"
     df["우편번호"] = df["우편번호"].fillna("-")
 
+    # 종업원수 필드가 없더라도 기본값 0 나오게
+    emp_col = next((c for c in ["TOT_EP_NUM", "totEmpCnt", "EMPE_NMBR_CNT", "TOT_EP_NO", "tot_ep_num"] if c in df.columns), None)
+    
+    if emp_col and not df.empty:
+        df["종업원(근로자)수"] = pd.to_numeric(df[emp_col], errors="coerce").fillna(0).astype(int)
+    else:
+        df["종업원(근로자)수"] = 0
+    
     # 종업원수 집계
     def extract_emp(row):
         tot_keys = ["TOTEPNUM", "HCWKRCNT", "TOTEMPLYCNT", "EMPLYCNT", "EMPLYCO"]
@@ -462,7 +470,13 @@ with tab1:
             
             c1, c2, c3, c4 = st.columns(4)
             c1.metric(f"{selected_region_name} 법인 발굴", f"{len(corp_df)} 개소")
-            tot_emp = corp_df["종업원(근로자)수"].sum() if not corp_df.empty else 0
+            #tot_emp = corp_df["종업원(근로자)수"].sum() if not corp_df.empty else 0
+            # ⬇️ 수정 후 (안전한 방어 코드)
+            if not corp_df.empty and "종업원(근로자)수" in corp_df.columns:
+                tot_emp = pd.to_numeric(corp_df["종업원(근로자)수"], errors="coerce").fillna(0).sum()
+            else:
+                tot_emp = 0
+    
             c2.metric("잠재 급여이체 대상", f"{tot_emp:,} 명" if tot_emp > 0 else "신설 법인")
             c3.metric("중점 유치 대상", "B2B 결제계좌 / 대량 급여이체 / 법인MMDA")
             c4.metric("전국 스캔 모수", f"{len(raw_df):,} 건")
