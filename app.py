@@ -306,32 +306,31 @@ def process_and_filter(df, sido, region_name, target_code, only_active=True, min
         df["우편번호"] = "-"
     df["우편번호"] = df["우편번호"].fillna("-")
 
-    # 종업원수 필드가 없더라도 기본값 0 나오게
-    emp_col = next((c for c in ["TOT_EP_NUM", "totEmpCnt", "EMPE_NMBR_CNT", "TOT_EP_NO", "tot_ep_num"] if c in df.columns), None)
-    
-    if emp_col and not df.empty:
-        df["종업원(근로자)수"] = pd.to_numeric(df[emp_col], errors="coerce").fillna(0).astype(int)
-    else:
-        df["종업원(근로자)수"] = 0
     
     # 종업원수 집계
-    def extract_emp(row):
-        tot_keys = ["TOTEPNUM", "HCWKRCNT", "TOTEMPLYCNT", "EMPLYCNT", "EMPLYCO"]
-        for k in tot_keys:
-            if k in norm and pd.notna(row[norm[k]]):
-                v = pd.to_numeric(row[norm[k]], errors="coerce")
-                if pd.notna(v) and v > 0:
-                    return int(v)
-        parts = 0
-        part_keys = ["MANEPNUM", "WMNEPNUM", "WMEPNUM", "HOFFEPNUM", "FCTYPRDNEPNUM", "FCTYOFCLNEPNUM", "FCTYEPNUM", "MNPWRCNT", "TOTWORKMANCNT"]
-        for k in part_keys:
-            if k in norm and pd.notna(row[norm[k]]):
-                v = pd.to_numeric(row[norm[k]], errors="coerce")
-                if pd.notna(v) and v > 0:
-                    parts += int(v)
-        return parts
-
-    df["종업원(근로자)수"] = df.apply(extract_emp, axis=1)
+    # df 기준 종업원(근로자)수 정교 추출 및 안전 생성 (return df 바로 위)
+        if not df.empty:
+            def extract_emp(row):
+                tot_keys = ["TOTEPNUM", "HCWKRCNT", "TOTEMPLYCNT", "EMPLYCNT", "EMPLYCO"]
+                for k in tot_keys:
+                    if k in norm and norm[k] in row.index and pd.notna(row[norm[k]]):
+                        v = pd.to_numeric(row[norm[k]], errors="coerce")
+                        if pd.notna(v) and v > 0:
+                            return int(v)
+                parts = 0
+                part_keys = ["MANEPNUM", "WMNEPNUM", "WMEPNUM", "HOFFEPNUM", "FCTYPRDNEPNUM", "FCTYOFCLNEPNUM", "FCTYEPNUM", "MNPWRCNT", "TOTWORKMANCNT"]
+                for k in part_keys:
+                    if k in norm and norm[k] in row.index and pd.notna(row[norm[k]]):
+                        v = pd.to_numeric(row[norm[k]], errors="coerce")
+                        if pd.notna(v) and v > 0:
+                            parts += int(v)
+                return parts
+    
+            df["종업원(근로자)수"] = df.apply(extract_emp, axis=1)
+        else:
+            df["종업원(근로자)수"] = 0
+    
+        return df
 
     # 전화번호
     tel_col = norm.get("TELNO", None)
@@ -485,8 +484,13 @@ with tab1:
             
             if not corp_df.empty:
                 display_corp = corp_df.copy()
-                display_corp["종업원수(표시)"] = display_corp["종업원(근로자)수"].apply(lambda v: f"{v}명" if v > 0 else "신설 (미기재)")
+               if "종업원(근로자)수" not in display_corp.columns:
+                   display_corp["종업원(근로자)수"] = 0
                 
+                # 2) 화면 표시용 컬럼 적용
+               display_corp["종업원수(표시)"] = display_corp["종업원(근로자)수"].apply(
+                   lambda v: f"{int(v)}명" if pd.notna(v) and float(v) > 0 else "신설 (미기재)"
+    
                 dist = selected_region_name.split(" ")[-1]
                 display_corp["업체정보"] = display_corp["사업장명"].apply(
                     lambda nm: f"https://map.naver.com/p/search/{urllib.parse.quote(f'{dist} {re.sub(r'\(주\)|\(유\)|주식회사|유한회사', '', str(nm)).strip()}')}"
