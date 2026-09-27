@@ -400,7 +400,7 @@ def generate_16_labels_html(df_target, title_suffix=""):
 tab1, tab2, tab3 = st.tabs([
     "🏢 법인 실시간 명부",
     "🏪 신규 소상공인 리스트",
-    "📊 지역별 8대 업종 비교 분석"
+    "📊 지역별 7대 업종 비교 분석"
 ])
 
 # 데이터 공통 수집 블록
