@@ -242,19 +242,18 @@ def search_corp_outline(api_key, query_name):
 
 # 7. 데이터 정밀 가공 (법인 vs 소상공인 자동 분류)
 def process_and_filter(df, sido, reg_name, code, active_only, min_open_date=None):
+    empty_schema = pd.DataFrame(columns=[
+        "사업장명", "사업자구분", "인허가일자", "사업장소재지", 
+        "우편번호", "종업원(근로자)수", "전화번호", "영업상태명", "지자체코드"
+    ])
+    
     if df is None or df.empty:
-        return pd.DataFrame()
+        return empty_schema
+
     df = df.copy()
     norm = {str(c).upper().replace("_", ""): c for c in df.columns}
-
-    # 법인 vs 소상공인(개인) 자동 판별
-    def classify_biz(name):
-        if re.search(r"\(주\)|주식회사|\(유\)|유한회사|\(합\)|합자회사|합명회사|사단법인|재단법인|의료법인", str(name)):
-            return "법인"
-        return "소상공인(개인)"
-    df["사업자구분"] = df["사업장명"].apply(classify_biz)
-
-    # 1. 💡 [핵심] 함수 시작하자마자 기간 외 과거 데이터(2003년 등) 원천 차단
+    
+    # 1. 날짜 필터링 (선택 기간 외 데이터 원천 차단)
     date_col = norm.get("LCPMTYMD", norm.get("PRMISNDE", norm.get("APVPERMYMD", norm.get("LCPMT_YMD", None))))
     if not date_col:
         for k, original_col in norm.items():
@@ -263,7 +262,6 @@ def process_and_filter(df, sido, reg_name, code, active_only, min_open_date=None
                 break
 
     if date_col and min_open_date:
-        # 날짜 형식으로 변환하여 선택한 기준일 이전 데이터는 즉시 제거
         clean_min = str(min_open_date).replace("-", "").strip()[:8]
         df["_dt_temp"] = pd.to_datetime(df[date_col].astype(str).str.replace(r"[^0-9]", "", regex=True), format="%Y%m%d", errors="coerce")
         min_dt = pd.to_datetime(clean_min, format="%Y%m%d", errors="coerce")
@@ -272,12 +270,26 @@ def process_and_filter(df, sido, reg_name, code, active_only, min_open_date=None
             df = df[df["_dt_temp"] >= min_dt].copy()
         df = df.drop(columns=["_dt_temp"], errors="ignore")
 
-    # 2. 이후 기존 정제 로직 계속 진행
-    name_col = norm.get("BPLCNM", df.columns[0])
-    df["사업장명"] = df[name_col].astype(str).str.strip()
+    # 필터링 후 데이터가 없으면 빈 스키마 반환
+    if df.empty:
+        return empty_schema
 
-    # 인허가일자 포맷팅
-    if date_col and not df.empty:
+    # 2. 사업장명 처리
+    name_col = norm.get("BPLCNM", df.columns[0] if len(df.columns) > 0 else None)
+    if name_col and name_col in df.columns:
+        df["사업장명"] = df[name_col].astype(str).str.strip()
+    else:
+        df["사업장명"] = "-"
+
+    # 법인 vs 소상공인(개인) 자동 판별
+    def classify_biz(name):
+        if re.search(r"\(주\)|주식회사|\(유\)|유한회사|\(합\)|합자회사|합명회사|사단법인|재단법인|의료법인", str(name)):
+            return "법인"
+        return "소상공인(개인)"
+    df["사업자구분"] = df["사업장명"].apply(classify_biz)
+
+    # 3. 인허가일자 포맷팅
+    if date_col and date_col in df.columns:
         def fmt_d(v):
             if pd.isna(v) or str(v).strip() in ["", "None", "nan", "null", "-"]:
                 return "-"
@@ -288,12 +300,12 @@ def process_and_filter(df, sido, reg_name, code, active_only, min_open_date=None
         df["인허가일자"] = df[date_col].apply(fmt_d)
     else:
         df["인허가일자"] = "-"
-        
-    # 주소
+
+    # 4. 주소 처리
     r_col = norm.get("ROADNMADDR", None)
     l_col = norm.get("LOTNOADDR", None)
-    s_road = df[r_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if r_col else None
-    s_lot = df[l_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if l_col else None
+    s_road = df[r_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if r_col and r_col in df.columns else None
+    s_lot = df[l_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if l_col and l_col in df.columns else None
     
     if s_road is not None and s_lot is not None:
         df["사업장소재지"] = s_road.combine_first(s_lot)
@@ -305,11 +317,11 @@ def process_and_filter(df, sido, reg_name, code, active_only, min_open_date=None
         df["사업장소재지"] = "주소 확인 필요"
     df["사업장소재지"] = df["사업장소재지"].fillna("주소 확인 필요")
 
-    # 우편번호
+    # 5. 우편번호 처리
     zr_col = norm.get("ROADNMZIP", None)
     zl_col = norm.get("LCTNZIP", None)
-    s_zr = df[zr_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if zr_col else None
-    s_zl = df[zl_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if zl_col else None
+    s_zr = df[zr_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if zr_col and zr_col in df.columns else None
+    s_zl = df[zl_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if zl_col and zl_col in df.columns else None
     
     if s_zr is not None and s_zl is not None:
         df["우편번호"] = s_zr.combine_first(s_zl)
@@ -321,18 +333,18 @@ def process_and_filter(df, sido, reg_name, code, active_only, min_open_date=None
         df["우편번호"] = "-"
     df["우편번호"] = df["우편번호"].fillna("-")
 
-    # 종업원수 집계
+    # 6. 종업원수 집계
     def extract_emp(row):
         tot_keys = ["TOTEPNUM", "HCWKRCNT", "TOTEMPLYCNT", "EMPLYCNT", "EMPLYCO"]
         for k in tot_keys:
-            if k in norm and pd.notna(row[norm[k]]):
+            if k in norm and norm[k] in row.index and pd.notna(row[norm[k]]):
                 v = pd.to_numeric(row[norm[k]], errors="coerce")
                 if pd.notna(v) and v > 0:
                     return int(v)
         parts = 0
         part_keys = ["MANEPNUM", "WMNEPNUM", "WMEPNUM", "HOFFEPNUM", "FCTYPRDNEPNUM", "FCTYOFCLNEPNUM", "FCTYEPNUM", "MNPWRCNT", "TOTWORKMANCNT"]
         for k in part_keys:
-            if k in norm and pd.notna(row[norm[k]]):
+            if k in norm and norm[k] in row.index and pd.notna(row[norm[k]]):
                 v = pd.to_numeric(row[norm[k]], errors="coerce")
                 if pd.notna(v) and v > 0:
                     parts += int(v)
@@ -340,19 +352,19 @@ def process_and_filter(df, sido, reg_name, code, active_only, min_open_date=None
 
     df["종업원(근로자)수"] = df.apply(extract_emp, axis=1)
 
-    # 전화번호
+    # 7. 전화번호
     tel_col = norm.get("TELNO", None)
-    df["전화번호"] = df[tel_col].astype(str).str.strip().replace(["", "None", "nan", "null"], "-") if tel_col else "-"
+    df["전화번호"] = df[tel_col].astype(str).str.strip().replace(["", "None", "nan", "null"], "-") if tel_col and tel_col in df.columns else "-"
 
-    # 영업상태 필터
+    # 8. 영업상태 필터
     stts_col = norm.get("SALSSTTSNM", norm.get("DTLSALSSTTSNM", None))
-    df["영업상태명"] = df[stts_col].astype(str).str.strip() if stts_col else "정상"
-    if active_only and stts_col:
+    df["영업상태명"] = df[stts_col].astype(str).str.strip() if stts_col and stts_col in df.columns else "정상"
+    if active_only and stts_col and stts_col in df.columns:
         df = df[df["영업상태명"].str.contains("영업|정상", na=False)]
 
-    # 자치단체코드 필터링
+    # 9. 지자체코드 필터링
     gov_col = norm.get("OPNATMYGRPCD", None)
-    df["지자체코드"] = df[gov_col].astype(str).str.strip() if gov_col else ""
+    df["지자체코드"] = df[gov_col].astype(str).str.strip() if gov_col and gov_col in df.columns else ""
 
     busan_codes = set([str(c) for c in range(3250000, 3410000, 10000)] + ["6260000", "6260000_ALL"])
     ulsan_codes = set([str(c) for c in range(3690000, 3740000, 10000)] + ["6310000", "6310000_ALL"])
@@ -392,8 +404,12 @@ def process_and_filter(df, sido, reg_name, code, active_only, min_open_date=None
         c_addr = df["사업장소재지"].str.contains(addr_regex, regex=True, na=False)
         filtered = df[c_code | c_addr].copy()
 
+    if filtered.empty:
+        return empty_schema
+
     filtered = filtered.sort_values(by="인허가일자", ascending=False)
     return filtered
+    
 
 # 8. 16칸 라벨지 (A4 / 2열 8행) HTML 생성 함수
 def generate_16_labels_html(df_target, title_suffix=""):
