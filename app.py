@@ -84,32 +84,15 @@ with st.sidebar:
     target_code = REGION_HIERARCHY[sido_choice][selected_region_name]
     
     only_active = st.checkbox("영업/정상 사업장만 조회", value=True)
-
-    # 사이드바: 인허가일자 기준 수집 시점 선택 옵션 (8자리로 수정)
-    DATE_OPTIONS = {
-        "2020년 1월 1일 이후 (기본)": "20200101",
-        "전체 데이터": None,
-        "2025년 1월 1일 이후": "20250101",
-        "2025년 7월 1일 이후": "20250701",
-        "2026년 1월 1일 이후": "20260101",
-        "2026년 7월 1일 이후": "20260701",
-    }
-
-    selected_date_label = st.sidebar.selectbox(
-        "📅 인허가 기준일 선택",
-        options=list(DATE_OPTIONS.keys()),
-        index=0
-    )
-    min_open_date_code = DATE_OPTIONS[selected_date_label]
-
+    
     st.divider()
     st.subheader("🔍 전국 데이터 탐색 범위")
     scan_pages = st.slider(
-            "수집 페이지 수 (페이지당 100건)",
-            min_value=5,
-            max_value=30,
-            value=15,
-            help="15페이지는 전국 최신 1,500건, 30페이지는 3,000건을 병렬로 고속 수집합니다."
+        "수집 페이지 수 (페이지당 100건)",
+        min_value=5,
+        max_value=30,
+        value=15,
+        help="15페이지는 전국 최신 1,500건, 30페이지는 3,000건을 병렬로 고속 수집합니다."
     )
 
 # 4. 단일 페이지 호출 함수 (지자체코드 파라미터 추가)
@@ -121,7 +104,7 @@ def fetch_single_page(clean_key, target_url, page, target_code):
         "resultType": "json"
     }
     
-    # 지자체 코드 조건만 유지 (날짜 cond 파라미터는 제거)
+    # 광역 전체(ALL)가 아닌 특정 시·군·구 선택 시 API 조건 검색 파라미터 추가
     if target_code and not target_code.endswith("_ALL"):
         params["cond[OPN_ATMY_GRP_CD::EQ]"] = target_code
 
@@ -129,8 +112,6 @@ def fetch_single_page(clean_key, target_url, page, target_code):
         res = requests.get(target_url, params=params, timeout=(10, 20))
         if res.status_code != 200:
             return None
-        
-        # JSON 파싱
         try:
             data = res.json()
             items = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
@@ -141,7 +122,6 @@ def fetch_single_page(clean_key, target_url, page, target_code):
         except Exception:
             pass
 
-        # XML 파싱 (Fallback)
         try:
             root = ET.fromstring(res.text)
             items_xml = root.findall(".//item")
@@ -149,30 +129,32 @@ def fetch_single_page(clean_key, target_url, page, target_code):
                 return pd.DataFrame([{c.tag: c.text for c in item} for item in items_xml])
         except Exception:
             pass
-            
     except Exception:
         return None
-        
     return None
 
-# 5. 다중 페이지 병렬 동시 수집 함수 (min_open_date 및 target_code 전달 반영)
+# 5. 다중 페이지 병렬 동시 수집 함수 (target_code 전달)
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_all_data(clean_key, ind_or_url, scan_pages, target_code, min_open_date="20200101"):
-    if not clean_key:
-        return None, "인증키가 필요합니다."
+def fetch_all_data(api_key, industry_name, total_pages, target_code):
+    if not api_key:
+        return None, "인증키가 감지되지 않았습니다. Streamlit Secrets를 확인해주세요."
     
-    # 업종명이 들어오면 URL 매핑, URL이 들어오면 그대로 사용
-    target_url = API_URL_MAP.get(ind_or_url, ind_or_url)
+    clean_key = urllib.parse.unquote(api_key.strip())
+    target_url = API_URL_MAP[industry_name]
     
     all_dfs = []
-    max_workers = min(scan_pages, 15)
+    pbar = st.progress(0, text=f"'{industry_name}' 데이터 병렬 수집 중 (총 {total_pages}장)...")
     
+    max_workers = min(total_pages, 15)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_page = {
             executor.submit(fetch_single_page, clean_key, target_url, page, target_code): page
-            for page in range(1, scan_pages + 1)
+            for page in range(1, total_pages + 1)
         }
+        completed_count = 0
         for future in as_completed(future_to_page):
+            completed_count += 1
+            pbar.progress(completed_count / total_pages, text=f"초고속 병렬 수집 중 ({completed_count}/{total_pages} 완료)...")
             try:
                 pdf = future.result()
                 if pdf is not None and not pdf.empty:
@@ -180,14 +162,15 @@ def fetch_all_data(clean_key, ind_or_url, scan_pages, target_code, min_open_date
             except Exception:
                 pass
                 
+    pbar.empty()
+    
     if all_dfs:
         combined = pd.concat(all_dfs, ignore_index=True)
         dup_col = next((c for c in ["MNG_NO", "mng_no", "OPN_ATMY_GRP_CD"] if c in combined.columns), None)
         if dup_col:
             combined = combined.drop_duplicates(subset=[dup_col])
         return combined, None
-        
-    return None, "데이터 수신에 실패했습니다."
+    return None, f"'{industry_name}' 데이터 수신에 실패했습니다."
 
 # 6. 금융위원회 기업기본정보 단건 조회 함수
 @st.cache_data(ttl=86400, show_spinner=False)
@@ -229,11 +212,9 @@ def search_corp_outline(api_key, query_name):
     return None
 
 # 7. 데이터 정밀 가공 (법인 vs 소상공인 자동 분류)
-def process_and_filter(df, sido, region_name, target_code, only_active=True, min_open_date="20200101"):
+def process_and_filter(df, sido, reg_name, code, active_only):
     norm = {str(c).upper().replace("_", ""): c for c in df.columns}
-    if df is None or df.empty:
-        return pd.DataFrame()
-        
+    
     name_col = norm.get("BPLCNM", df.columns[0])
     df["사업장명"] = df[name_col].astype(str).str.strip()
 
@@ -245,22 +226,8 @@ def process_and_filter(df, sido, region_name, target_code, only_active=True, min
     df["사업자구분"] = df["사업장명"].apply(classify_biz)
 
     # 인허가일자
-    # date_col = norm.get("LCPMTYMD", norm.get("PRMISNDE", norm.get("APVPERMYMD", None)))
-    # if date_col:
-
-    # 1. 14자리 날짜 코드가 넘어와도 앞 8자리(YYYYMMDD)만 추출
-    clean_min_date = str(min_open_date)[:8] if min_open_date else None
-    
-    # 2. 인허가일자 컬럼 검색
-    date_col = next((c for c in ["LCPMT_YMD", "lcpmtYmd", "LCPMTYMD", "PRMISNDE", "APVPERMYMD", "opnSvcDt"] if c in df.columns), None)
-    
-    if date_col and min_open_date:
-        # 문자열 숫자로 변환 후 min_open_date 이상인 데이터만 남김
-        temp_date = df[date_col].astype(str).str.replace(r"[^0-9]", "", regex=True)
-        df = df[temp_date.ge(min_open_date) & (temp_date.str.len() >= 8)].copy()
-
-    # 2. 남은 데이터에 대해 기존에 작성하셨던 예쁜 날짜 포맷팅 적용
-    if date_col and not df.empty:
+    date_col = norm.get("LCPMTYMD", norm.get("PRMISNDE", norm.get("APVPERMYMD", None)))
+    if date_col:
         def fmt_d(v):
             if pd.isna(v) or str(v).strip() in ["", "None", "nan", "null", "-"]:
                 return "-"
@@ -269,11 +236,9 @@ def process_and_filter(df, sido, region_name, target_code, only_active=True, min
                 return f"{cv[:4]}-{cv[4:6]}-{cv[6:8]}"
             return str(v)[:10]
         df["인허가일자"] = df[date_col].apply(fmt_d)
-    elif not df.empty:
+    else:
         df["인허가일자"] = "-"
-        
-    return df
-    
+
     # 주소
     r_col = norm.get("ROADNMADDR", None)
     l_col = norm.get("LOTNOADDR", None)
@@ -290,15 +255,6 @@ def process_and_filter(df, sido, region_name, target_code, only_active=True, min
         df["사업장소재지"] = "주소 확인 필요"
     df["사업장소재지"] = df["사업장소재지"].fillna("주소 확인 필요")
 
-    # 사업장소재지 컬럼 표준화 (return df 바로 위)
-    if not df.empty and "사업장소재지" not in df.columns:
-        addr_col = next((c for c in ["RDNWLEADR", "SITEWLEADR", "RDNADDR", "SITEADDR", "RDNWL_ADDR", "SITE_ADDR"] if c in df.columns), None)
-        df["사업장소재지"] = df[addr_col] if addr_col else "-"
-    elif df.empty:
-        df["사업장소재지"] = "-"
-
-    return df
-    
     # 우편번호
     zr_col = norm.get("ROADNMZIP", None)
     zl_col = norm.get("LCTNZIP", None)
@@ -315,31 +271,24 @@ def process_and_filter(df, sido, region_name, target_code, only_active=True, min
         df["우편번호"] = "-"
     df["우편번호"] = df["우편번호"].fillna("-")
 
-    
     # 종업원수 집계
-    # df 기준 종업원(근로자)수 정교 추출 및 안전 생성 (return df 바로 위)
-    if not df.empty:
-        def extract_emp(row):
-            tot_keys = ["TOTEPNUM", "HCWKRCNT", "TOTEMPLYCNT", "EMPLYCNT", "EMPLYCO"]
-            for k in tot_keys:
-                if k in norm and norm[k] in row.index and pd.notna(row[norm[k]]):
-                    v = pd.to_numeric(row[norm[k]], errors="coerce")
-                    if pd.notna(v) and v > 0:
-                        return int(v)
-            parts = 0
-            part_keys = ["MANEPNUM", "WMNEPNUM", "WMEPNUM", "HOFFEPNUM", "FCTYPRDNEPNUM", "FCTYOFCLNEPNUM", "FCTYEPNUM", "MNPWRCNT", "TOTWORKMANCNT"]
-            for k in part_keys:
-                if k in norm and norm[k] in row.index and pd.notna(row[norm[k]]):
-                    v = pd.to_numeric(row[norm[k]], errors="coerce")
-                    if pd.notna(v) and v > 0:
-                        parts += int(v)
-            return parts
+    def extract_emp(row):
+        tot_keys = ["TOTEPNUM", "HCWKRCNT", "TOTEMPLYCNT", "EMPLYCNT", "EMPLYCO"]
+        for k in tot_keys:
+            if k in norm and pd.notna(row[norm[k]]):
+                v = pd.to_numeric(row[norm[k]], errors="coerce")
+                if pd.notna(v) and v > 0:
+                    return int(v)
+        parts = 0
+        part_keys = ["MANEPNUM", "WMNEPNUM", "WMEPNUM", "HOFFEPNUM", "FCTYPRDNEPNUM", "FCTYOFCLNEPNUM", "FCTYEPNUM", "MNPWRCNT", "TOTWORKMANCNT"]
+        for k in part_keys:
+            if k in norm and pd.notna(row[norm[k]]):
+                v = pd.to_numeric(row[norm[k]], errors="coerce")
+                if pd.notna(v) and v > 0:
+                    parts += int(v)
+        return parts
 
-        df["종업원(근로자)수"] = df.apply(extract_emp, axis=1)
-    else:
-        df["종업원(근로자)수"] = 0
-
-    return df
+    df["종업원(근로자)수"] = df.apply(extract_emp, axis=1)
 
     # 전화번호
     tel_col = norm.get("TELNO", None)
@@ -478,13 +427,7 @@ with tab1:
             
             c1, c2, c3, c4 = st.columns(4)
             c1.metric(f"{selected_region_name} 법인 발굴", f"{len(corp_df)} 개소")
-            #tot_emp = corp_df["종업원(근로자)수"].sum() if not corp_df.empty else 0
-            # ⬇️ 수정 후 (안전한 방어 코드)
-            if not corp_df.empty and "종업원(근로자)수" in corp_df.columns:
-                tot_emp = pd.to_numeric(corp_df["종업원(근로자)수"], errors="coerce").fillna(0).sum()
-            else:
-                tot_emp = 0
-    
+            tot_emp = corp_df["종업원(근로자)수"].sum() if not corp_df.empty else 0
             c2.metric("잠재 급여이체 대상", f"{tot_emp:,} 명" if tot_emp > 0 else "신설 법인")
             c3.metric("중점 유치 대상", "B2B 결제계좌 / 대량 급여이체 / 법인MMDA")
             c4.metric("전국 스캔 모수", f"{len(raw_df):,} 건")
@@ -493,13 +436,8 @@ with tab1:
             
             if not corp_df.empty:
                 display_corp = corp_df.copy()
-                if "종업원(근로자)수" not in display_corp.columns:
-                    display_corp["종업원(근로자)수"] = 0
+                display_corp["종업원수(표시)"] = display_corp["종업원(근로자)수"].apply(lambda v: f"{v}명" if v > 0 else "신설 (미기재)")
                 
-                # 2) 화면 표시용 컬럼 적용
-                display_corp["종업원수(표시)"] = display_corp["종업원(근로자)수"].apply(
-                    lambda v: f"{int(v)}명" if pd.notna(v) and float(v) > 0 else "신설 (미기재)"
-                )
                 dist = selected_region_name.split(" ")[-1]
                 display_corp["업체정보"] = display_corp["사업장명"].apply(
                     lambda nm: f"https://map.naver.com/p/search/{urllib.parse.quote(f'{dist} {re.sub(r'\(주\)|\(유\)|주식회사|유한회사', '', str(nm)).strip()}')}"
@@ -683,7 +621,7 @@ with tab3:
                 progress_bar.progress((idx + 1) / len(industries), text=f"'{ind_name}' 수집 및 분석 중 ({idx+1}/{len(industries)})...")
                 
                 # target_code를 함께 전달하여 지역별 정확한 수집 수행
-                raw_ind, _ = fetch_all_data(user_api_key, ind_name, scan_pages, target_code, min_open_date=min_open_date_code)
+                raw_ind, _ = fetch_all_data(user_api_key, ind_name, scan_pages, target_code)
                 
                 if raw_ind is not None and not raw_ind.empty:
                     f_df = process_and_filter(raw_ind, sido_choice, selected_region_name, target_code, only_active)
