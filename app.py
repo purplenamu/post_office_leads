@@ -628,7 +628,7 @@ with tab2:
                     st.download_button(
                         label=f"📄 {selected_region_name} 소상공인 16칸 라벨 다운로드/인쇄",
                         data=label_html_sole,
-                        file_name=f"우체국_소상공인라벨_{selected_region_name}_{datetime.date.today()}.html",
+                        file_name=f"우체국_소상공인라벨_{selected_region_name}_{datetime.today().date()}.html",
                         mime="text/html"
                     )
                     with st.expander("👀 소상공인 16칸 라벨 미리보기"):
