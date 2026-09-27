@@ -242,10 +242,10 @@ def search_corp_outline(api_key, query_name):
 
 # 7. 데이터 정밀 가공 (법인 vs 소상공인 자동 분류)
 def process_and_filter(df, sido, reg_name, code, active_only, min_open_date=None):
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df = df.copy()
     norm = {str(c).upper().replace("_", ""): c for c in df.columns}
-    
-    name_col = norm.get("BPLCNM", df.columns[0])
-    df["사업장명"] = df[name_col].astype(str).str.strip()
 
     # 법인 vs 소상공인(개인) 자동 판별
     def classify_biz(name):
@@ -254,14 +254,27 @@ def process_and_filter(df, sido, reg_name, code, active_only, min_open_date=None
         return "소상공인(개인)"
     df["사업자구분"] = df["사업장명"].apply(classify_biz)
 
-    # 인허가일자 찾기
-    date_col = norm.get("LCPMTYMD", norm.get("PRMISNDE", norm.get("APVPERMYMD", None)))
-    
-    # 💡 [추가] 기간 필터링 적용 (선택한 기간 이후 데이터만 남김)
+    # 1. 💡 [핵심] 함수 시작하자마자 기간 외 과거 데이터(2003년 등) 원천 차단
+    date_col = norm.get("LCPMTYMD", norm.get("PRMISNDE", norm.get("APVPERMYMD", norm.get("LCPMT_YMD", None))))
+    if not date_col:
+        for k, original_col in norm.items():
+            if "YMD" in k or "DATE" in k or "일자" in str(original_col):
+                date_col = original_col
+                break
+
     if date_col and min_open_date:
-        clean_min_date = str(min_open_date).replace("-", "").strip()[:8]
-        temp_date = df[date_col].astype(str).str.replace(r"[^0-9]", "", regex=True)
-        df = df[temp_date.ge(clean_min_date) & (temp_date.str.len() >= 8)].copy()
+        # 날짜 형식으로 변환하여 선택한 기준일 이전 데이터는 즉시 제거
+        clean_min = str(min_open_date).replace("-", "").strip()[:8]
+        df["_dt_temp"] = pd.to_datetime(df[date_col].astype(str).str.replace(r"[^0-9]", "", regex=True), format="%Y%m%d", errors="coerce")
+        min_dt = pd.to_datetime(clean_min, format="%Y%m%d", errors="coerce")
+        
+        if pd.notna(min_dt):
+            df = df[df["_dt_temp"] >= min_dt].copy()
+        df = df.drop(columns=["_dt_temp"], errors="ignore")
+
+    # 2. 이후 기존 정제 로직 계속 진행
+    name_col = norm.get("BPLCNM", df.columns[0])
+    df["사업장명"] = df[name_col].astype(str).str.strip()
 
     # 인허가일자 포맷팅
     if date_col and not df.empty:
