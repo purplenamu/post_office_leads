@@ -509,6 +509,16 @@ filtered_df = pd.DataFrame()
 raw_df = None
 err_msg = None
 
+# 514번 줄 바로 위에 아래 코드를 추가해주세요
+clean_key = urllib.parse.unquote(user_api_key.strip())
+target_url = API_URL_MAP[selected_industry]
+
+# 그 다음 이어서 실행
+first_df, total_count = fetch_first_page_and_count(clean_key, target_url, target_code, min_open_date)
+total_pages = math.ceil(total_count / 100) if total_count > 0 else 1
+
+raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, total_pages, target_code, min_open_date)
+
 # 514번 줄 바로 위에 아래 코드가 있는지 확인해 보세요!
 # (만약 첫 페이지를 먼저 조회해서 페이지 수를 계산하는 방식이라면:)
 first_df, total_count = fetch_first_page_and_count(clean_key, target_url, target_code, min_open_date)
