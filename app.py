@@ -96,7 +96,7 @@ with st.sidebar:
     )
 
 # 4. 단일 페이지 호출 함수 (지자체코드 파라미터 추가)
-def fetch_single_page(clean_key, target_url, page, target_code, min_open_date="20200101"):
+def fetch_single_page(clean_key, target_url, page, target_code):
     params = {
         "serviceKey": clean_key,
         "pageNo": str(page),
@@ -108,13 +108,11 @@ def fetch_single_page(clean_key, target_url, page, target_code, min_open_date="2
     if target_code and not target_code.endswith("_ALL"):
         params["cond[OPN_ATMY_GRP_CD::EQ]"] = target_code
 
-    # 인허가일자(LCPMT_YMD) 기준 필터 조건 추가 (예: 2020년 1월 1일 이후 개업 업체만 조회)[cite: 1]
-    if min_open_date:
-        params["cond[LCPMT_YMD::GTE]"] = min_open_date
-        
     try:
         res = requests.get(target_url, params=params, timeout=(10, 20))
-        if res.status_code == 200:
+        if res.status_code != 200:
+            return None
+        try:
             data = res.json()
             items = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
             if isinstance(items, dict):
@@ -123,8 +121,7 @@ def fetch_single_page(clean_key, target_url, page, target_code, min_open_date="2
                 return pd.DataFrame(items)
         except Exception:
             pass
-        return None
-    
+
         try:
             root = ET.fromstring(res.text)
             items_xml = root.findall(".//item")
