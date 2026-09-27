@@ -9,9 +9,9 @@ import xml.etree.ElementTree as ET
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-st.set_page_config(page_title="우체국 B2B & 소상공인 마케팅 알리미", layout="wide")
+st.set_page_config(page_title="우체국예금 법인 & 소상공인 마케팅 대상 알리미", layout="wide")
 
-st.title("📮 우체국 B2B 법인 & 신규 소상공인 마케팅 알리미")
+st.title("📮 우체국예금 법인 & 소상공인 마케팅 대상 알리미")
 st.caption("공공데이터 실시간 API + 금융위원회 기업기본정보 공식 연동 (병렬 고속 수집 엔진)")
 
 # 1. 공식 승인 5대 전략 업종 엔드포인트
