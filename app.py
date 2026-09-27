@@ -549,7 +549,7 @@ with tab1:
                     st.download_button(
                         label=f"📄 {selected_region_name} 법인 16칸 라벨 다운로드/인쇄",
                         data=label_html,
-                        file_name=f"우체국_법인라벨_{selected_region_name}_{datetime.date.today()}.html",
+                        file_name=f"우체국_법인라벨_{selected_region_name}_{datetime.today().date()}.html",
                         mime="text/html"
                     )
                 else:
