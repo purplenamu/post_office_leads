@@ -605,15 +605,15 @@ with tab2:
         st.info("👈 사이드바에 공공데이터 API 인증키를 확인해주세요.")
 
 
-# --- [TAB 3: 지역별 8대 업종 비교 분석 차트] ---
+# --- [TAB 3: 지역별 7대 업종 비교 분석 차트] ---
 with tab3:
-    st.subheader(f"📊 '{selected_region_name}' 8대 타깃 업종 모수 비교 분석")
-    st.caption("선택하신 관할 지역의 8대 업종별 사업자 수와 근로자 규모를 실시간 집계합니다.")
+    st.subheader(f"📊 '{selected_region_name}' 7대 타깃 업종 모수 비교 분석")
+    st.caption("선택하신 관할 지역의 7대 업종별 사업자 수와 근로자 규모를 실시간 집계합니다.")
     
     if user_api_key:
-        if st.button("🚀 8대 업종 분포 현황 집계 및 차트 생성", type="primary"):
+        if st.button("🚀 7대 업종 분포 현황 집계 및 차트 생성", type="primary"):
             industry_stats = []
-            progress_bar = st.progress(0, text="8대 업종 데이터 통합 분석 중...")
+            progress_bar = st.progress(0, text="7대 업종 데이터 통합 분석 중...")
             
             industries = list(API_URL_MAP.keys())
             for idx, ind_name in enumerate(industries):
@@ -655,7 +655,7 @@ with tab3:
             
             sc1, sc2, sc3 = st.columns(3)
             sc1.metric(f"{selected_region_name} 최다 업종 (1위)", top_ind)
-            sc2.metric("8대 업종 총 사업체수", f"{total_biz:,} 개소")
+            sc2.metric("7대 업종 총 사업체수", f"{total_biz:,} 개소")
             sc3.metric("잠재 총 종사자수", f"{df_stat['종업원수'].sum():,} 명")
             
             st.divider()
@@ -683,13 +683,13 @@ with tab3:
                 st.bar_chart(df_stat.set_index("업종")[["종업원수"]], color="#d32f2f")
             
             st.divider()
-            st.markdown("##### 📋 8대 업종 순위 및 영업 타깃 분석표")
+            st.markdown("##### 📋 7대 업종 순위 및 영업 타깃 분석표")
             st.dataframe(
                 df_stat.rename(columns={"업종": "타깃 업종", "사업체수": "발굴 사업체 수(개소)", "종업원수": "총 종업원 수(명)", "추천전략": "중점 유치 상품"}),
                 hide_index=True,
                 use_container_width=True
             )
         else:
-            st.info("👆 위 **[8대 업종 분포 현황 집계 및 차트 생성]** 버튼을 누르면 관내 현황을 집계합니다.")
+            st.info("👆 위 **[7대 업종 분포 현황 집계 및 차트 생성]** 버튼을 누르면 관내 현황을 집계합니다.")
     else:
         st.info("👈 사이드바에 공공데이터 API 인증키를 확인해주세요.")
