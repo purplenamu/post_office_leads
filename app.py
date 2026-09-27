@@ -509,6 +509,17 @@ filtered_df = pd.DataFrame()
 raw_df = None
 err_msg = None
 
+# 514번 줄 바로 위에 아래 코드가 있는지 확인해 보세요!
+# (만약 첫 페이지를 먼저 조회해서 페이지 수를 계산하는 방식이라면:)
+first_df, total_count = fetch_first_page_and_count(clean_key, target_url, target_code, min_open_date)
+total_pages = math.ceil(total_count / 100) if total_count > 0 else 1
+
+# 또는 사용자가 지정한 최대 수집 페이지 수(예: max_pages)를 total_pages에 대입하는 경우:
+# total_pages = max_pages 
+
+# 그 후 호출
+raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, total_pages, target_code, min_open_date)
+
 # 메인 데이터 호출부
 if user_api_key:
     raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, total_pages, target_code, min_open_date)
