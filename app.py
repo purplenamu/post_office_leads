@@ -85,43 +85,43 @@ with st.sidebar:
     
     only_active = st.checkbox("영업/정상 사업장만 조회", value=True)
 
-# 사이드바에 기간 선택 UI 추가
-from datetime import datetime
-from dateutil.relativedelta import relativedelta
+    # 사이드바에 기간 선택 UI 추가
+    from datetime import datetime
+    from dateutil.relativedelta import relativedelta
 
-# 사이드바 기간 선택 컴포넌트
-period_option = st.sidebar.selectbox(
-    "인허가일자 기준일 선택",
-    ["최근 3개월", "최근 6개월", "최근 1년", "최근 3년", "최근 5년"],
-    index=2  # 기본값: 최근 1년
-)
+    # 사이드바 기간 선택 컴포넌트
+    period_option = st.sidebar.selectbox(
+        "인허가일자 기준일 선택",
+        ["최근 3개월", "최근 6개월", "최근 1년", "최근 3년", "최근 5년"],
+        index=2  # 기본값: 최근 1년
+    )
 
-# 선택된 기간에 따른 기준일(YYYYMMDD) 계산
-today = datetime.today()
-if "3개월" in period_option:
-    min_date = today - relativedelta(months=3)
-elif "6개월" in period_option:
-    min_date = today - relativedelta(months=6)
-elif "1년" in period_option:
-    min_date = today - relativedelta(years=1)
-elif "3년" in period_option:
-    min_date = today - relativedelta(years=3)
-elif "5년" in period_option:
-    min_date = today - relativedelta(years=5)
-else:
-    min_date = today - relativedelta(years=1)
-
-min_open_date = min_date.strftime("%Y%m%d")
-
-st.divider()
-st.subheader("🔍 전국 데이터 탐색 범위")
-scan_pages = st.slider(
-    "수집 페이지 수 (페이지당 100건)",
-    min_value=5,
-    max_value=30,
-    value=15,
-    help="15페이지는 전국 최신 1,500건, 30페이지는 3,000건을 병렬로 고속 수집합니다."
-)
+    # 선택된 기간에 따른 기준일(YYYYMMDD) 계산
+    today = datetime.today()
+    if "3개월" in period_option:
+        min_date = today - relativedelta(months=3)
+    elif "6개월" in period_option:
+        min_date = today - relativedelta(months=6)
+    elif "1년" in period_option:
+        min_date = today - relativedelta(years=1)
+    elif "3년" in period_option:
+        min_date = today - relativedelta(years=3)
+    elif "5년" in period_option:
+        min_date = today - relativedelta(years=5)
+    else:
+        min_date = today - relativedelta(years=1)
+    
+    min_open_date = min_date.strftime("%Y%m%d")
+    
+    st.divider()
+    st.subheader("🔍 전국 데이터 탐색 범위")
+    scan_pages = st.slider(
+        "수집 페이지 수 (페이지당 100건)",
+        min_value=5,
+        max_value=30,
+        value=15,
+        help="15페이지는 전국 최신 1,500건, 30페이지는 3,000건을 병렬로 고속 수집합니다."
+    )
 
 
 # 4. 단일 페이지 호출 함수 (지자체코드 파라미터 추가)
