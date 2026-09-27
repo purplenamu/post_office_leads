@@ -559,7 +559,7 @@ with tab2:
                 edited_sole = st.data_editor(
                     display_sole[view_cols],
                     column_config={
-                        "인허가일자": st.column_config.TextColumn("개설일자"),
+                        "인허가일자": st.column_config.TextColumn("인허가일자"),
                         "우편번호": st.column_config.TextColumn("우편번호"),
                         "업체정보": st.column_config.LinkColumn("플레이스", display_text="🏢 업체정보"),
                         "건물위치": st.column_config.LinkColumn("지도/로드뷰", display_text="📍 건물위치"),
