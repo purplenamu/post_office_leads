@@ -484,13 +484,13 @@ with tab1:
             
             if not corp_df.empty:
                 display_corp = corp_df.copy()
-            if "종업원(근로자)수" not in display_corp.columns:
-                display_corp["종업원(근로자)수"] = 0
+                if "종업원(근로자)수" not in display_corp.columns:
+                    display_corp["종업원(근로자)수"] = 0
                 
                 # 2) 화면 표시용 컬럼 적용
-            display_corp["종업원수(표시)"] = display_corp["종업원(근로자)수"].apply(
-                lambda v: f"{int(v)}명" if pd.notna(v) and float(v) > 0 else "신설 (미기재)"
-            )
+                display_corp["종업원수(표시)"] = display_corp["종업원(근로자)수"].apply(
+                    lambda v: f"{int(v)}명" if pd.notna(v) and float(v) > 0 else "신설 (미기재)"
+                )
                 dist = selected_region_name.split(" ")[-1]
                 display_corp["업체정보"] = display_corp["사업장명"].apply(
                     lambda nm: f"https://map.naver.com/p/search/{urllib.parse.quote(f'{dist} {re.sub(r'\(주\)|\(유\)|주식회사|유한회사', '', str(nm)).strip()}')}"
