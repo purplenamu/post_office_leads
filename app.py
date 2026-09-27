@@ -113,7 +113,7 @@ with st.sidebar:
     )
 
 # 4. 단일 페이지 호출 함수 (지자체코드 파라미터 추가)
-def fetch_single_page(clean_key, target_url, page, target_code, min_open_date="20200101"):
+def fetch_single_page(clean_key, target_url, page, target_code):
     params = {
         "serviceKey": clean_key,
         "pageNo": str(page),
@@ -121,18 +121,15 @@ def fetch_single_page(clean_key, target_url, page, target_code, min_open_date="2
         "resultType": "json"
     }
     
-    # 광역 전체(ALL)가 아닌 특정 시·군·구 선택 시 API 조건 검색 파라미터 추가
+    # 지자체 검색 조건만 유지
     if target_code and not target_code.endswith("_ALL"):
         params["cond[OPN_ATMY_GRP_CD::EQ]"] = target_code
 
-    # 인허가일자(LCPMT_YMD) 기준 필터 조건 추가 (예: 2020년 1월 1일 이후 개업 업체만 조회)[cite: 1]
-    if min_open_date:
-        params["cond[LCPMT_YMD::GTE]"] = min_open_date
-        
     try:
         res = requests.get(target_url, params=params, timeout=(10, 20))
         if res.status_code != 200:
             return None
+        
         try:
             data = res.json()
             items = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
@@ -150,8 +147,10 @@ def fetch_single_page(clean_key, target_url, page, target_code, min_open_date="2
                 return pd.DataFrame([{c.tag: c.text for c in item} for item in items_xml])
         except Exception:
             pass
+            
     except Exception:
         return None
+        
     return None
 
 # 5. 다중 페이지 병렬 동시 수집 함수 (min_open_date 및 target_code 전달 반영)
@@ -233,7 +232,7 @@ def search_corp_outline(api_key, query_name):
     return None
 
 # 7. 데이터 정밀 가공 (법인 vs 소상공인 자동 분류)
-def process_and_filter(df, sido, reg_name, code, active_only):
+def process_and_filter(df, sido, region_name, target_code, only_active=True, min_open_date="20200101"):
     norm = {str(c).upper().replace("_", ""): c for c in df.columns}
     
     name_col = norm.get("BPLCNM", df.columns[0])
@@ -247,8 +246,19 @@ def process_and_filter(df, sido, reg_name, code, active_only):
     df["사업자구분"] = df["사업장명"].apply(classify_biz)
 
     # 인허가일자
-    date_col = norm.get("LCPMTYMD", norm.get("PRMISNDE", norm.get("APVPERMYMD", None)))
-    if date_col:
+    # date_col = norm.get("LCPMTYMD", norm.get("PRMISNDE", norm.get("APVPERMYMD", None)))
+    # if date_col:
+
+    # 1. 사이드바에서 선택한 기준일(min_open_date)을 기준으로 필터링 먼저 수행
+    date_col = next((c for c in ["LCPMT_YMD", "lcpmtYmd", "LCPMTYMD", "PRMISNDE", "APVPERMYMD"] if c in df.columns), None)
+
+    if date_col and min_open_date:
+        # 문자열 숫자로 변환 후 min_open_date 이상인 데이터만 남김
+        temp_date = df[date_col].astype(str).str.replace(r"[^0-9]", "", regex=True)
+        df = df[temp_date.ge(min_open_date) & (temp_date.str.len() >= 8)].copy()
+
+    # 2. 남은 데이터에 대해 기존에 작성하셨던 예쁜 날짜 포맷팅 적용
+    if date_col and not df.empty:
         def fmt_d(v):
             if pd.isna(v) or str(v).strip() in ["", "None", "nan", "null", "-"]:
                 return "-"
