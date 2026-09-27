@@ -121,7 +121,7 @@ def fetch_single_page(clean_key, target_url, page, target_code):
         "resultType": "json"
     }
     
-    # 지자체 검색 조건만 유지
+    # 지자체 코드 조건만 유지 (날짜 cond 파라미터는 제거)
     if target_code and not target_code.endswith("_ALL"):
         params["cond[OPN_ATMY_GRP_CD::EQ]"] = target_code
 
@@ -130,6 +130,7 @@ def fetch_single_page(clean_key, target_url, page, target_code):
         if res.status_code != 200:
             return None
         
+        # JSON 파싱
         try:
             data = res.json()
             items = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
@@ -140,6 +141,7 @@ def fetch_single_page(clean_key, target_url, page, target_code):
         except Exception:
             pass
 
+        # XML 파싱 (Fallback)
         try:
             root = ET.fromstring(res.text)
             items_xml = root.findall(".//item")
@@ -155,26 +157,22 @@ def fetch_single_page(clean_key, target_url, page, target_code):
 
 # 5. 다중 페이지 병렬 동시 수집 함수 (min_open_date 및 target_code 전달 반영)
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_all_data(clean_key, target_url, scan_pages, target_code, min_open_date="20200101"):
+def fetch_all_data(clean_key, ind_or_url, scan_pages, target_code, min_open_date="20200101"):
     if not clean_key:
-        return None, "인증키가 감지되지 않았습니다. Streamlit Secrets를 확인해주세요."
+        return None, "인증키가 필요합니다."
+    
+    # 업종명이 들어오면 URL 매핑, URL이 들어오면 그대로 사용
+    target_url = API_URL_MAP.get(ind_or_url, ind_or_url)
     
     all_dfs = []
-    pbar = st.progress(0, text=f"데이터 병렬 수집 중 (총 {scan_pages}장)...")
-    
     max_workers = min(scan_pages, 15)
-    future_to_page = {}
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # 각 페이지별 작업을 ThreadPool에 등록 (min_open_date 전달)
-        for page in range(1, scan_pages + 1):
-            future = executor.submit(fetch_single_page, clean_key, target_url, page, target_code, min_open_date)
-            future_to_page[future] = page
-            
-        completed_count = 0
+        future_to_page = {
+            executor.submit(fetch_single_page, clean_key, target_url, page, target_code): page
+            for page in range(1, scan_pages + 1)
+        }
         for future in as_completed(future_to_page):
-            completed_count += 1
-            pbar.progress(completed_count / scan_pages, text=f"초고속 병렬 수집 중 ({completed_count}/{scan_pages} 완료)...")
             try:
                 pdf = future.result()
                 if pdf is not None and not pdf.empty:
@@ -182,15 +180,14 @@ def fetch_all_data(clean_key, target_url, scan_pages, target_code, min_open_date
             except Exception:
                 pass
                 
-    pbar.empty()
-    
     if all_dfs:
         combined = pd.concat(all_dfs, ignore_index=True)
         dup_col = next((c for c in ["MNG_NO", "mng_no", "OPN_ATMY_GRP_CD"] if c in combined.columns), None)
         if dup_col:
             combined = combined.drop_duplicates(subset=[dup_col])
         return combined, None
-    return None, "데이터 수신에 실패했거나 조건에 맞는 데이터가 없습니다."
+        
+    return None, "데이터 수신에 실패했습니다."
 
 # 6. 금융위원회 기업기본정보 단건 조회 함수
 @st.cache_data(ttl=86400, show_spinner=False)
@@ -234,7 +231,9 @@ def search_corp_outline(api_key, query_name):
 # 7. 데이터 정밀 가공 (법인 vs 소상공인 자동 분류)
 def process_and_filter(df, sido, region_name, target_code, only_active=True, min_open_date="20200101"):
     norm = {str(c).upper().replace("_", ""): c for c in df.columns}
-    
+    if df is None or df.empty:
+        return pd.DataFrame()
+        
     name_col = norm.get("BPLCNM", df.columns[0])
     df["사업장명"] = df[name_col].astype(str).str.strip()
 
@@ -249,9 +248,12 @@ def process_and_filter(df, sido, region_name, target_code, only_active=True, min
     # date_col = norm.get("LCPMTYMD", norm.get("PRMISNDE", norm.get("APVPERMYMD", None)))
     # if date_col:
 
-    # 1. 사이드바에서 선택한 기준일(min_open_date)을 기준으로 필터링 먼저 수행
-    date_col = next((c for c in ["LCPMT_YMD", "lcpmtYmd", "LCPMTYMD", "PRMISNDE", "APVPERMYMD"] if c in df.columns), None)
-
+    # 1. 14자리 날짜 코드가 넘어와도 앞 8자리(YYYYMMDD)만 추출
+    clean_min_date = str(min_open_date)[:8] if min_open_date else None
+    
+    # 2. 인허가일자 컬럼 검색
+    date_col = next((c for c in ["LCPMT_YMD", "lcpmtYmd", "LCPMTYMD", "PRMISNDE", "APVPERMYMD", "opnSvcDt"] if c in df.columns), None)
+    
     if date_col and min_open_date:
         # 문자열 숫자로 변환 후 min_open_date 이상인 데이터만 남김
         temp_date = df[date_col].astype(str).str.replace(r"[^0-9]", "", regex=True)
@@ -267,9 +269,11 @@ def process_and_filter(df, sido, region_name, target_code, only_active=True, min
                 return f"{cv[:4]}-{cv[4:6]}-{cv[6:8]}"
             return str(v)[:10]
         df["인허가일자"] = df[date_col].apply(fmt_d)
-    else:
+    elif not df.empty:
         df["인허가일자"] = "-"
-
+        
+    return df
+    
     # 주소
     r_col = norm.get("ROADNMADDR", None)
     l_col = norm.get("LOTNOADDR", None)
