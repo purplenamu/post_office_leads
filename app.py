@@ -9,9 +9,9 @@ import xml.etree.ElementTree as ET
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-st.set_page_config(page_title="우체국 B2B & 소상공인 신규 영업대상 발굴기", layout="wide")
+st.set_page_config(page_title="우체국 B2B & 소상공인 마케팅 알리미", layout="wide")
 
-st.title("📮 우체국 예금 신규 영업대상(법인 & 소상공인) 발굴기")
+st.title("📮 우체국 B2B 법인 & 신규 소상공인 마케팅 알리미")
 st.caption("공공데이터 실시간 API + 금융위원회 기업기본정보 공식 연동 (병렬 고속 수집 엔진)")
 
 # 1. 공식 승인 5대 전략 업종 엔드포인트
@@ -20,11 +20,10 @@ API_URL_MAP = {
     "건설폐기물처리업": "https://apis.data.go.kr/1741000/construction_waste_disposal/info",
     "건물위생관리업": "https://apis.data.go.kr/1741000/building_sanitation/info",
     "소독업": "https://apis.data.go.kr/1741000/disinfection_companies/info",
-    "의원": "https://apis.data.go.kr/1741000/clinics/info",
-    
+    "의원": "https://apis.data.go.kr/1741000/clinics/info",    
     "일반음식점": "https://apis.data.go.kr/1741000/general_restaurants/info",
     "휴게음식점": "https://apis.data.go.kr/1741000/rest_cafes/info",
-    "미용업": "https://apis.data.go.kr/1741000/beauty_salons/info"
+#    "미용업": "https://apis.data.go.kr/1741000/beauty_salons/info"
 }
 
 # 금융위원회 기업기본정보(기업개요) 공식 엔드포인트
@@ -84,34 +83,6 @@ with st.sidebar:
     target_code = REGION_HIERARCHY[sido_choice][selected_region_name]
     
     only_active = st.checkbox("영업/정상 사업장만 조회", value=True)
-
-    # 사이드바에 기간 선택 UI 추가
-    from datetime import datetime
-    from dateutil.relativedelta import relativedelta
-
-    # 사이드바 기간 선택 컴포넌트
-    period_option = st.sidebar.selectbox(
-        "인허가일자 기준일 선택",
-        ["최근 3개월", "최근 6개월", "최근 1년", "최근 3년", "최근 5년"],
-        index=2  # 기본값: 최근 1년
-    )
-
-    # 선택된 기간에 따른 기준일(YYYYMMDD) 계산
-    today = datetime.today()
-    if "3개월" in period_option:
-        min_date = today - relativedelta(months=3)
-    elif "6개월" in period_option:
-        min_date = today - relativedelta(months=6)
-    elif "1년" in period_option:
-        min_date = today - relativedelta(years=1)
-    elif "3년" in period_option:
-        min_date = today - relativedelta(years=3)
-    elif "5년" in period_option:
-        min_date = today - relativedelta(years=5)
-    else:
-        min_date = today - relativedelta(years=1)
-    
-    min_open_date = min_date.strftime("%Y%m%d")
     
     st.divider()
     st.subheader("🔍 전국 데이터 탐색 범위")
@@ -122,38 +93,9 @@ with st.sidebar:
         value=15,
         help="15페이지는 전국 최신 1,500건, 30페이지는 3,000건을 병렬로 고속 수집합니다."
     )
-    
-#첫 페이지와 전체 개수를 가져오는 함수 
-def fetch_first_page_and_count(clean_key, target_url, target_code, min_open_date=None):
-    params = {
-        "serviceKey": clean_key,
-        "pageNo": "1",
-        "numOfRows": "100",
-        "resultType": "json"
-    }
-    if target_code and not target_code.endswith("_ALL"):
-        params["cond[OPN_ATMY_GRP_CD::EQ]"] = target_code
-    if min_open_date:
-        params["cond[LCPMT_YMD::GTE]"] = str(min_open_date).replace("-", "").strip()[:8]
-        
-    try:
-        res = requests.get(target_url, params=params, timeout=(10, 20))
-        if res.status_code != 200:
-            return pd.DataFrame(), 0
-        data = res.json()
-        body = data.get("response", {}).get("body", {})
-        total_count = body.get("totalCount", 0)
-        items = body.get("items", {}).get("item", [])
-        if isinstance(items, dict):
-            items = [items]
-        df = pd.DataFrame(items) if items else pd.DataFrame()
-        return df, int(total_count)
-    except Exception:
-        return pd.DataFrame(), 0
-
 
 # 4. 단일 페이지 호출 함수 (지자체코드 파라미터 추가)
-def fetch_single_page(clean_key, target_url, page, target_code, min_open_date=None):
+def fetch_single_page(clean_key, target_url, page, target_code):
     params = {
         "serviceKey": clean_key,
         "pageNo": str(page),
@@ -164,12 +106,7 @@ def fetch_single_page(clean_key, target_url, page, target_code, min_open_date=No
     # 광역 전체(ALL)가 아닌 특정 시·군·구 선택 시 API 조건 검색 파라미터 추가
     if target_code and not target_code.endswith("_ALL"):
         params["cond[OPN_ATMY_GRP_CD::EQ]"] = target_code
-        
-    # 2. 💡 [핵심] 미용업 등 지원하는 API는 서버 측에서 날짜 이상(GTE) 조건 직접 적용
-    if min_open_date:
-        clean_date = str(min_open_date).replace("-", "").strip()[:8]
-        params["cond[LCPMT_YMD::GTE]"] = clean_date
-        
+
     try:
         res = requests.get(target_url, params=params, timeout=(10, 20))
         if res.status_code != 200:
@@ -195,9 +132,9 @@ def fetch_single_page(clean_key, target_url, page, target_code, min_open_date=No
         return None
     return None
 
-# 5. 다중 페이지 병렬 동시 수집 함수 (min_open_date 파라미터 추가)
+# 5. 다중 페이지 병렬 동시 수집 함수 (target_code 전달)
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_all_data(api_key, industry_name, total_pages, target_code, min_open_date=None):  # 👈 1. 인자에 min_open_date 추가
+def fetch_all_data(api_key, industry_name, total_pages, target_code):
     if not api_key:
         return None, "인증키가 감지되지 않았습니다. Streamlit Secrets를 확인해주세요."
     
@@ -210,8 +147,7 @@ def fetch_all_data(api_key, industry_name, total_pages, target_code, min_open_da
     max_workers = min(total_pages, 15)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_page = {
-            # 👈 2. fetch_single_page 호출 시 min_open_date 전달
-            executor.submit(fetch_single_page, clean_key, target_url, page, target_code, min_open_date): page
+            executor.submit(fetch_single_page, clean_key, target_url, page, target_code): page
             for page in range(1, total_pages + 1)
         }
         completed_count = 0
@@ -275,45 +211,11 @@ def search_corp_outline(api_key, query_name):
     return None
 
 # 7. 데이터 정밀 가공 (법인 vs 소상공인 자동 분류)
-def process_and_filter(df, sido, reg_name, code, active_only, min_open_date=None):
-    empty_schema = pd.DataFrame(columns=[
-        "사업장명", "사업자구분", "인허가일자", "사업장소재지", 
-        "우편번호", "종업원(근로자)수", "전화번호", "영업상태명", "지자체코드"
-    ])
-    
-    if df is None or df.empty:
-        return empty_schema
-
-    df = df.copy()
+def process_and_filter(df, sido, reg_name, code, active_only):
     norm = {str(c).upper().replace("_", ""): c for c in df.columns}
     
-    # 1. 날짜 필터링 (선택 기간 외 데이터 원천 차단)
-    date_col = norm.get("LCPMTYMD", norm.get("PRMISNDE", norm.get("APVPERMYMD", norm.get("LCPMT_YMD", None))))
-    if not date_col:
-        for k, original_col in norm.items():
-            if "YMD" in k or "DATE" in k or "일자" in str(original_col):
-                date_col = original_col
-                break
-
-    if date_col and min_open_date:
-        clean_min = str(min_open_date).replace("-", "").strip()[:8]
-        df["_dt_temp"] = pd.to_datetime(df[date_col].astype(str).str.replace(r"[^0-9]", "", regex=True), format="%Y%m%d", errors="coerce")
-        min_dt = pd.to_datetime(clean_min, format="%Y%m%d", errors="coerce")
-        
-        if pd.notna(min_dt):
-            df = df[df["_dt_temp"] >= min_dt].copy()
-        df = df.drop(columns=["_dt_temp"], errors="ignore")
-
-    # 필터링 후 데이터가 없으면 빈 스키마 반환
-    if df.empty:
-        return empty_schema
-
-    # 2. 사업장명 처리
-    name_col = norm.get("BPLCNM", df.columns[0] if len(df.columns) > 0 else None)
-    if name_col and name_col in df.columns:
-        df["사업장명"] = df[name_col].astype(str).str.strip()
-    else:
-        df["사업장명"] = "-"
+    name_col = norm.get("BPLCNM", df.columns[0])
+    df["사업장명"] = df[name_col].astype(str).str.strip()
 
     # 법인 vs 소상공인(개인) 자동 판별
     def classify_biz(name):
@@ -322,8 +224,9 @@ def process_and_filter(df, sido, reg_name, code, active_only, min_open_date=None
         return "소상공인(개인)"
     df["사업자구분"] = df["사업장명"].apply(classify_biz)
 
-    # 3. 인허가일자 포맷팅
-    if date_col and date_col in df.columns:
+    # 인허가일자
+    date_col = norm.get("LCPMTYMD", norm.get("PRMISNDE", norm.get("APVPERMYMD", None)))
+    if date_col:
         def fmt_d(v):
             if pd.isna(v) or str(v).strip() in ["", "None", "nan", "null", "-"]:
                 return "-"
@@ -335,11 +238,11 @@ def process_and_filter(df, sido, reg_name, code, active_only, min_open_date=None
     else:
         df["인허가일자"] = "-"
 
-    # 4. 주소 처리
+    # 주소
     r_col = norm.get("ROADNMADDR", None)
     l_col = norm.get("LOTNOADDR", None)
-    s_road = df[r_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if r_col and r_col in df.columns else None
-    s_lot = df[l_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if l_col and l_col in df.columns else None
+    s_road = df[r_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if r_col else None
+    s_lot = df[l_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if l_col else None
     
     if s_road is not None and s_lot is not None:
         df["사업장소재지"] = s_road.combine_first(s_lot)
@@ -351,11 +254,11 @@ def process_and_filter(df, sido, reg_name, code, active_only, min_open_date=None
         df["사업장소재지"] = "주소 확인 필요"
     df["사업장소재지"] = df["사업장소재지"].fillna("주소 확인 필요")
 
-    # 5. 우편번호 처리
+    # 우편번호
     zr_col = norm.get("ROADNMZIP", None)
     zl_col = norm.get("LCTNZIP", None)
-    s_zr = df[zr_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if zr_col and zr_col in df.columns else None
-    s_zl = df[zl_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if zl_col and zl_col in df.columns else None
+    s_zr = df[zr_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if zr_col else None
+    s_zl = df[zl_col].astype(str).str.strip().replace(["", "None", "nan", "null", "-"], None) if zl_col else None
     
     if s_zr is not None and s_zl is not None:
         df["우편번호"] = s_zr.combine_first(s_zl)
@@ -367,18 +270,18 @@ def process_and_filter(df, sido, reg_name, code, active_only, min_open_date=None
         df["우편번호"] = "-"
     df["우편번호"] = df["우편번호"].fillna("-")
 
-    # 6. 종업원수 집계
+    # 종업원수 집계
     def extract_emp(row):
         tot_keys = ["TOTEPNUM", "HCWKRCNT", "TOTEMPLYCNT", "EMPLYCNT", "EMPLYCO"]
         for k in tot_keys:
-            if k in norm and norm[k] in row.index and pd.notna(row[norm[k]]):
+            if k in norm and pd.notna(row[norm[k]]):
                 v = pd.to_numeric(row[norm[k]], errors="coerce")
                 if pd.notna(v) and v > 0:
                     return int(v)
         parts = 0
         part_keys = ["MANEPNUM", "WMNEPNUM", "WMEPNUM", "HOFFEPNUM", "FCTYPRDNEPNUM", "FCTYOFCLNEPNUM", "FCTYEPNUM", "MNPWRCNT", "TOTWORKMANCNT"]
         for k in part_keys:
-            if k in norm and norm[k] in row.index and pd.notna(row[norm[k]]):
+            if k in norm and pd.notna(row[norm[k]]):
                 v = pd.to_numeric(row[norm[k]], errors="coerce")
                 if pd.notna(v) and v > 0:
                     parts += int(v)
@@ -386,19 +289,19 @@ def process_and_filter(df, sido, reg_name, code, active_only, min_open_date=None
 
     df["종업원(근로자)수"] = df.apply(extract_emp, axis=1)
 
-    # 7. 전화번호
+    # 전화번호
     tel_col = norm.get("TELNO", None)
-    df["전화번호"] = df[tel_col].astype(str).str.strip().replace(["", "None", "nan", "null"], "-") if tel_col and tel_col in df.columns else "-"
+    df["전화번호"] = df[tel_col].astype(str).str.strip().replace(["", "None", "nan", "null"], "-") if tel_col else "-"
 
-    # 8. 영업상태 필터
+    # 영업상태 필터
     stts_col = norm.get("SALSSTTSNM", norm.get("DTLSALSSTTSNM", None))
-    df["영업상태명"] = df[stts_col].astype(str).str.strip() if stts_col and stts_col in df.columns else "정상"
-    if active_only and stts_col and stts_col in df.columns:
+    df["영업상태명"] = df[stts_col].astype(str).str.strip() if stts_col else "정상"
+    if active_only and stts_col:
         df = df[df["영업상태명"].str.contains("영업|정상", na=False)]
 
-    # 9. 지자체코드 필터링
+    # 자치단체코드 필터링
     gov_col = norm.get("OPNATMYGRPCD", None)
-    df["지자체코드"] = df[gov_col].astype(str).str.strip() if gov_col and gov_col in df.columns else ""
+    df["지자체코드"] = df[gov_col].astype(str).str.strip() if gov_col else ""
 
     busan_codes = set([str(c) for c in range(3250000, 3410000, 10000)] + ["6260000", "6260000_ALL"])
     ulsan_codes = set([str(c) for c in range(3690000, 3740000, 10000)] + ["6310000", "6310000_ALL"])
@@ -438,12 +341,8 @@ def process_and_filter(df, sido, reg_name, code, active_only, min_open_date=None
         c_addr = df["사업장소재지"].str.contains(addr_regex, regex=True, na=False)
         filtered = df[c_code | c_addr].copy()
 
-    if filtered.empty:
-        return empty_schema
-
     filtered = filtered.sort_values(by="인허가일자", ascending=False)
     return filtered
-    
 
 # 8. 16칸 라벨지 (A4 / 2열 8행) HTML 생성 함수
 def generate_16_labels_html(df_target, title_suffix=""):
@@ -509,30 +408,9 @@ filtered_df = pd.DataFrame()
 raw_df = None
 err_msg = None
 
-
-# 그 다음 이어서 실행
-first_df, total_count = fetch_first_page_and_count(clean_key, target_url, target_code, min_open_date)
-total_pages = math.ceil(total_count / 100) if total_count > 0 else 1
-
-raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, total_pages, target_code, min_open_date)
-
-# 514번 줄 바로 위에 아래 코드가 있는지 확인해 보세요!
-# (만약 첫 페이지를 먼저 조회해서 페이지 수를 계산하는 방식이라면:)
-first_df, total_count = fetch_first_page_and_count(clean_key, target_url, target_code, min_open_date)
-total_pages = math.ceil(total_count / 100) if total_count > 0 else 1
-
-
-# 514번 줄 바로 위에 아래 코드를 추가해주세요
-clean_key = urllib.parse.unquote(user_api_key.strip())
-target_url = API_URL_MAP[selected_industry]
-
-
-# 그 후 호출
-raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, total_pages, target_code, min_open_date)
-
 # 메인 데이터 호출부
 if user_api_key:
-    raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, total_pages, target_code, min_open_date)
+    raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, scan_pages, target_code)
     if raw_df is not None and not raw_df.empty:
         filtered_df = process_and_filter(raw_df, sido_choice, selected_region_name, target_code, only_active)
 
@@ -573,7 +451,7 @@ with tab1:
                 edited_corp = st.data_editor(
                     display_corp[view_cols],
                     column_config={
-                        "인허가일자": st.column_config.TextColumn("인허가일자"),
+                        "인허가일자": st.column_config.TextColumn("개설(인허가)일자"),
                         "우편번호": st.column_config.TextColumn("우편번호"),
                         "업체정보": st.column_config.LinkColumn("플레이스", display_text="🏢 업체정보"),
                         "건물위치": st.column_config.LinkColumn("지도/로드뷰", display_text="📍 건물위치"),
@@ -633,7 +511,7 @@ with tab1:
                     st.download_button(
                         label=f"📄 {selected_region_name} 법인 16칸 라벨 다운로드/인쇄",
                         data=label_html,
-                        file_name=f"우체국_법인라벨_{selected_region_name}_{datetime.today().date()}.html",
+                        file_name=f"우체국_법인라벨_{selected_region_name}_{datetime.date.today()}.html",
                         mime="text/html"
                     )
                 else:
@@ -680,7 +558,7 @@ with tab2:
                 edited_sole = st.data_editor(
                     display_sole[view_cols],
                     column_config={
-                        "인허가일자": st.column_config.TextColumn("인허가일자"),
+                        "인허가일자": st.column_config.TextColumn("개설일자"),
                         "우편번호": st.column_config.TextColumn("우편번호"),
                         "업체정보": st.column_config.LinkColumn("플레이스", display_text="🏢 업체정보"),
                         "건물위치": st.column_config.LinkColumn("지도/로드뷰", display_text="📍 건물위치"),
@@ -712,7 +590,7 @@ with tab2:
                     st.download_button(
                         label=f"📄 {selected_region_name} 소상공인 16칸 라벨 다운로드/인쇄",
                         data=label_html_sole,
-                        file_name=f"우체국_소상공인라벨_{selected_region_name}_{datetime.today().date()}.html",
+                        file_name=f"우체국_소상공인라벨_{selected_region_name}_{datetime.date.today()}.html",
                         mime="text/html"
                     )
                     with st.expander("👀 소상공인 16칸 라벨 미리보기"):
@@ -742,7 +620,7 @@ with tab3:
                 progress_bar.progress((idx + 1) / len(industries), text=f"'{ind_name}' 수집 및 분석 중 ({idx+1}/{len(industries)})...")
                 
                 # target_code를 함께 전달하여 지역별 정확한 수집 수행
-                raw_ind, _ = fetch_all_data(user_api_key, ind_name, scan_pages, target_code, min_open_date)
+                raw_ind, _ = fetch_all_data(user_api_key, ind_name, scan_pages, target_code)
                 
                 if raw_ind is not None and not raw_ind.empty:
                     f_df = process_and_filter(raw_ind, sido_choice, selected_region_name, target_code, only_active)
