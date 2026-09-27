@@ -84,7 +84,35 @@ with st.sidebar:
     target_code = REGION_HIERARCHY[sido_choice][selected_region_name]
     
     only_active = st.checkbox("영업/정상 사업장만 조회", value=True)
-    
+
+# 사이드바에 기간 선택 UI 추가
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+
+# 사이드바 기간 선택 컴포넌트
+period_option = st.sidebar.selectbox(
+    "신규 개업 기준일 선택",
+    ["최근 3개월", "최근 6개월", "최근 1년", "최근 3년", "최근 5년"],
+    index=2  # 기본값: 최근 1년
+)
+
+# 선택된 기간에 따른 기준일(YYYYMMDD) 계산
+today = datetime.today()
+if "3개월" in period_option:
+    min_date = today - relativedelta(months=3)
+elif "6개월" in period_option:
+    min_date = today - relativedelta(months=6)
+elif "1년" in period_option:
+    min_date = today - relativedelta(years=1)
+elif "3년" in period_option:
+    min_date = today - relativedelta(years=3)
+elif "5년" in period_option:
+    min_date = today - relativedelta(years=5)
+else:
+    min_date = today - relativedelta(years=1)
+
+min_open_date = min_date.strftime("%Y%m%d")
+
     st.divider()
     st.subheader("🔍 전국 데이터 탐색 범위")
     scan_pages = st.slider(
@@ -212,7 +240,7 @@ def search_corp_outline(api_key, query_name):
     return None
 
 # 7. 데이터 정밀 가공 (법인 vs 소상공인 자동 분류)
-def process_and_filter(df, sido, reg_name, code, active_only):
+def process_and_filter(df, sido, reg_name, code, active_only, min_open_date=None):
     norm = {str(c).upper().replace("_", ""): c for c in df.columns}
     
     name_col = norm.get("BPLCNM", df.columns[0])
@@ -225,9 +253,17 @@ def process_and_filter(df, sido, reg_name, code, active_only):
         return "소상공인(개인)"
     df["사업자구분"] = df["사업장명"].apply(classify_biz)
 
-    # 인허가일자
+    # 인허가일자 찾기
     date_col = norm.get("LCPMTYMD", norm.get("PRMISNDE", norm.get("APVPERMYMD", None)))
-    if date_col:
+    
+    # 💡 [추가] 기간 필터링 적용 (선택한 기간 이후 데이터만 남김)
+    if date_col and min_open_date:
+        clean_min_date = str(min_open_date).replace("-", "").strip()[:8]
+        temp_date = df[date_col].astype(str).str.replace(r"[^0-9]", "", regex=True)
+        df = df[temp_date.ge(clean_min_date) & (temp_date.str.len() >= 8)].copy()
+
+    # 인허가일자 포맷팅
+    if date_col and not df.empty:
         def fmt_d(v):
             if pd.isna(v) or str(v).strip() in ["", "None", "nan", "null", "-"]:
                 return "-"
@@ -238,7 +274,7 @@ def process_and_filter(df, sido, reg_name, code, active_only):
         df["인허가일자"] = df[date_col].apply(fmt_d)
     else:
         df["인허가일자"] = "-"
-
+        
     # 주소
     r_col = norm.get("ROADNMADDR", None)
     l_col = norm.get("LOTNOADDR", None)
