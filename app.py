@@ -91,7 +91,7 @@ from dateutil.relativedelta import relativedelta
 
 # 사이드바 기간 선택 컴포넌트
 period_option = st.sidebar.selectbox(
-    "신규 개업 기준일 선택",
+    "인허가일자 기준일 선택",
     ["최근 3개월", "최근 6개월", "최근 1년", "최근 3년", "최근 5년"],
     index=2  # 기본값: 최근 1년
 )
@@ -113,15 +113,15 @@ else:
 
 min_open_date = min_date.strftime("%Y%m%d")
 
-st.divider()
-st.subheader("🔍 전국 데이터 탐색 범위")
-scan_pages = st.slider(
-    "수집 페이지 수 (페이지당 100건)",
-    min_value=5,
-    max_value=30,
-    value=15,
-    help="15페이지는 전국 최신 1,500건, 30페이지는 3,000건을 병렬로 고속 수집합니다."
-)
+    st.divider()
+    st.subheader("🔍 전국 데이터 탐색 범위")
+    scan_pages = st.slider(
+        "수집 페이지 수 (페이지당 100건)",
+        min_value=5,
+        max_value=30,
+        value=15,
+        help="15페이지는 전국 최신 1,500건, 30페이지는 3,000건을 병렬로 고속 수집합니다."
+    )
 
 # 4. 단일 페이지 호출 함수 (지자체코드 파라미터 추가)
 def fetch_single_page(clean_key, target_url, page, target_code):
