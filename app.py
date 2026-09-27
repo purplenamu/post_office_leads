@@ -123,7 +123,8 @@ def fetch_single_page(clean_key, target_url, page, target_code, min_open_date="2
                 return pd.DataFrame(items)
         except Exception:
             pass
-
+        return None
+    
         try:
             root = ET.fromstring(res.text)
             items_xml = root.findall(".//item")
