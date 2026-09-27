@@ -290,6 +290,15 @@ def process_and_filter(df, sido, region_name, target_code, only_active=True, min
         df["사업장소재지"] = "주소 확인 필요"
     df["사업장소재지"] = df["사업장소재지"].fillna("주소 확인 필요")
 
+    # 사업장소재지 컬럼 표준화 (return df 바로 위)
+    if not df.empty and "사업장소재지" not in df.columns:
+        addr_col = next((c for c in ["RDNWLEADR", "SITEWLEADR", "RDNADDR", "SITEADDR", "RDNWL_ADDR", "SITE_ADDR"] if c in df.columns), None)
+        df["사업장소재지"] = df[addr_col] if addr_col else "-"
+    elif df.empty:
+        df["사업장소재지"] = "-"
+
+    return df
+    
     # 우편번호
     zr_col = norm.get("ROADNMZIP", None)
     zl_col = norm.get("LCTNZIP", None)
