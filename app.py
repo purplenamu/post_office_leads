@@ -125,7 +125,7 @@ with st.sidebar:
 
 
 # 4. 단일 페이지 호출 함수 (지자체코드 파라미터 추가)
-def fetch_single_page(clean_key, target_url, page, target_code):
+def fetch_single_page(clean_key, target_url, page, target_code, min_open_date=None):
     params = {
         "serviceKey": clean_key,
         "pageNo": str(page),
@@ -136,7 +136,12 @@ def fetch_single_page(clean_key, target_url, page, target_code):
     # 광역 전체(ALL)가 아닌 특정 시·군·구 선택 시 API 조건 검색 파라미터 추가
     if target_code and not target_code.endswith("_ALL"):
         params["cond[OPN_ATMY_GRP_CD::EQ]"] = target_code
-
+        
+    # 2. 💡 [핵심] 미용업 등 지원하는 API는 서버 측에서 날짜 이상(GTE) 조건 직접 적용
+    if min_open_date:
+        clean_date = str(min_open_date).replace("-", "").strip()[:8]
+        params["cond[LCPMT_YMD::GTE]"] = clean_date
+        
     try:
         res = requests.get(target_url, params=params, timeout=(10, 20))
         if res.status_code != 200:
