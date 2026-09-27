@@ -122,6 +122,34 @@ with st.sidebar:
         value=15,
         help="15페이지는 전국 최신 1,500건, 30페이지는 3,000건을 병렬로 고속 수집합니다."
     )
+    
+#첫 페이지와 전체 개수를 가져오는 함수 
+def fetch_first_page_and_count(clean_key, target_url, target_code, min_open_date=None):
+    params = {
+        "serviceKey": clean_key,
+        "pageNo": "1",
+        "numOfRows": "100",
+        "resultType": "json"
+    }
+    if target_code and not target_code.endswith("_ALL"):
+        params["cond[OPN_ATMY_GRP_CD::EQ]"] = target_code
+    if min_open_date:
+        params["cond[LCPMT_YMD::GTE]"] = str(min_open_date).replace("-", "").strip()[:8]
+        
+    try:
+        res = requests.get(target_url, params=params, timeout=(10, 20))
+        if res.status_code != 200:
+            return pd.DataFrame(), 0
+        data = res.json()
+        body = data.get("response", {}).get("body", {})
+        total_count = body.get("totalCount", 0)
+        items = body.get("items", {}).get("item", [])
+        if isinstance(items, dict):
+            items = [items]
+        df = pd.DataFrame(items) if items else pd.DataFrame()
+        return df, int(total_count)
+    except Exception:
+        return pd.DataFrame(), 0
 
 
 # 4. 단일 페이지 호출 함수 (지자체코드 파라미터 추가)
@@ -167,9 +195,9 @@ def fetch_single_page(clean_key, target_url, page, target_code, min_open_date=No
         return None
     return None
 
-# 5. 다중 페이지 병렬 동시 수집 함수 (target_code 전달)
+# 5. 다중 페이지 병렬 동시 수집 함수 (min_open_date 파라미터 추가)
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_all_data(api_key, industry_name, total_pages, target_code):
+def fetch_all_data(api_key, industry_name, total_pages, target_code, min_open_date=None):  # 👈 1. 인자에 min_open_date 추가
     if not api_key:
         return None, "인증키가 감지되지 않았습니다. Streamlit Secrets를 확인해주세요."
     
@@ -182,7 +210,8 @@ def fetch_all_data(api_key, industry_name, total_pages, target_code):
     max_workers = min(total_pages, 15)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_page = {
-            executor.submit(fetch_single_page, clean_key, target_url, page, target_code): page
+            # 👈 2. fetch_single_page 호출 시 min_open_date 전달
+            executor.submit(fetch_single_page, clean_key, target_url, page, target_code, min_open_date): page
             for page in range(1, total_pages + 1)
         }
         completed_count = 0
@@ -482,7 +511,7 @@ err_msg = None
 
 # 메인 데이터 호출부
 if user_api_key:
-    raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, scan_pages, target_code)
+    raw_df, err_msg = fetch_all_data(user_api_key, selected_industry, total_pages, target_code, min_open_date)
     if raw_df is not None and not raw_df.empty:
         filtered_df = process_and_filter(raw_df, sido_choice, selected_region_name, target_code, only_active)
 
@@ -692,7 +721,7 @@ with tab3:
                 progress_bar.progress((idx + 1) / len(industries), text=f"'{ind_name}' 수집 및 분석 중 ({idx+1}/{len(industries)})...")
                 
                 # target_code를 함께 전달하여 지역별 정확한 수집 수행
-                raw_ind, _ = fetch_all_data(user_api_key, ind_name, scan_pages, target_code)
+                raw_ind, _ = fetch_all_data(user_api_key, ind_name, scan_pages, target_code, min_open_date)
                 
                 if raw_ind is not None and not raw_ind.empty:
                     f_df = process_and_filter(raw_ind, sido_choice, selected_region_name, target_code, only_active)
