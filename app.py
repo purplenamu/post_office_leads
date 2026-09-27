@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 st.set_page_config(page_title="우체국 B2B & 소상공인 신규 영업대상 발굴기", layout="wide")
 
-st.title("📮 우체국 B2B 법인 & 소상공인 신규 영업대상 발굴기")
+st.title("📮 우체국 예금 신규 영업대상(법인 & 소상공인) 발굴기")
 st.caption("공공데이터 실시간 API + 금융위원회 기업기본정보 공식 연동 (병렬 고속 수집 엔진)")
 
 # 1. 공식 승인 5대 전략 업종 엔드포인트
