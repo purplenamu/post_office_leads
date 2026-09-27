@@ -309,28 +309,28 @@ def process_and_filter(df, sido, region_name, target_code, only_active=True, min
     
     # 종업원수 집계
     # df 기준 종업원(근로자)수 정교 추출 및 안전 생성 (return df 바로 위)
-        if not df.empty:
-            def extract_emp(row):
-                tot_keys = ["TOTEPNUM", "HCWKRCNT", "TOTEMPLYCNT", "EMPLYCNT", "EMPLYCO"]
-                for k in tot_keys:
-                    if k in norm and norm[k] in row.index and pd.notna(row[norm[k]]):
-                        v = pd.to_numeric(row[norm[k]], errors="coerce")
-                        if pd.notna(v) and v > 0:
-                            return int(v)
-                parts = 0
-                part_keys = ["MANEPNUM", "WMNEPNUM", "WMEPNUM", "HOFFEPNUM", "FCTYPRDNEPNUM", "FCTYOFCLNEPNUM", "FCTYEPNUM", "MNPWRCNT", "TOTWORKMANCNT"]
-                for k in part_keys:
-                    if k in norm and norm[k] in row.index and pd.notna(row[norm[k]]):
-                        v = pd.to_numeric(row[norm[k]], errors="coerce")
-                        if pd.notna(v) and v > 0:
-                            parts += int(v)
-                return parts
-    
-            df["종업원(근로자)수"] = df.apply(extract_emp, axis=1)
-        else:
-            df["종업원(근로자)수"] = 0
-    
-        return df
+    if not df.empty:
+        def extract_emp(row):
+            tot_keys = ["TOTEPNUM", "HCWKRCNT", "TOTEMPLYCNT", "EMPLYCNT", "EMPLYCO"]
+            for k in tot_keys:
+                if k in norm and norm[k] in row.index and pd.notna(row[norm[k]]):
+                    v = pd.to_numeric(row[norm[k]], errors="coerce")
+                    if pd.notna(v) and v > 0:
+                        return int(v)
+            parts = 0
+            part_keys = ["MANEPNUM", "WMNEPNUM", "WMEPNUM", "HOFFEPNUM", "FCTYPRDNEPNUM", "FCTYOFCLNEPNUM", "FCTYEPNUM", "MNPWRCNT", "TOTWORKMANCNT"]
+            for k in part_keys:
+                if k in norm and norm[k] in row.index and pd.notna(row[norm[k]]):
+                    v = pd.to_numeric(row[norm[k]], errors="coerce")
+                    if pd.notna(v) and v > 0:
+                        parts += int(v)
+            return parts
+
+        df["종업원(근로자)수"] = df.apply(extract_emp, axis=1)
+    else:
+        df["종업원(근로자)수"] = 0
+
+    return df
 
     # 전화번호
     tel_col = norm.get("TELNO", None)
