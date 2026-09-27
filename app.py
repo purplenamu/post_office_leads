@@ -398,8 +398,8 @@ def generate_16_labels_html(df_target, title_suffix=""):
 
 # 9. 메인 화면 3대 탭 구성 (법인 / 소상공인 / 비교분석)
 tab1, tab2, tab3 = st.tabs([
-    "🏢 법인 실시간 명부",
-    "🏪 신규 소상공인 리스트",
+    "🏢 법인 리스트",
+    "🏪 소상공인 리스트",
     "📊 지역별 7대 업종 비교 분석"
 ])
 
@@ -533,7 +533,7 @@ with tab2:
             sole_df["영업상태"] = "접촉 전"
             
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric(f"{selected_region_name} 신규 소상공인", f"{len(sole_df)} 개소")
+            c1.metric(f"{selected_region_name} 소상공인", f"{len(sole_df)} 개소")
             c2.metric("최우선 추천 상품", "노란우산공제 (폐업·노후보장)")
             c3.metric("연계 우대 혜택", "우체국 소상공인예금 +0.5%p")
             c4.metric("관할 지역", selected_region_name)
